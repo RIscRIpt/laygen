@@ -1,3 +1,22 @@
-int main() {
-    return 0;
+#include "restruc.hxx"
+
+#include <iostream>
+
+int wmain(int argc, wchar_t *argv[])
+{
+    if (argc != 2) {
+        std::cerr << "restruct.exe <filename>\n";
+        return EXIT_FAILURE;
+    }
+
+    try {
+        rstc::Restruc restruc(argv[1]);
+        restruc.analyze();
+    }
+    catch (std::exception const &e) {
+        std::cerr << e.what() << '\n';
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
 }
