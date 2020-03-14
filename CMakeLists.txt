@@ -23,18 +23,19 @@ set_target_properties(
 )
 
 target_link_libraries(
-    ${PROJECT_NAME}
-    PRIVATE zycore zydis
+    ${PROJECT_NAME} PRIVATE
+    zycore
+    zydis
 )
 
 target_link_directories(
-    ${PROJECT_NAME}
-    PRIVATE ${zycore_LIB_DIR}
-    PRIVATE ${zydis_LIB_DIR}
+    ${PROJECT_NAME} PRIVATE
+    ${zycore_LIB_DIR}
+    ${zydis_LIB_DIR}
 )
 
 target_include_directories(
-    ${PROJECT_NAME}
-    PRIVATE ${zycore_INCLUDE_DIR}
-    PRIVATE ${zydis_INCLUDE_DIR}
+    ${PROJECT_NAME} PRIVATE
+    ${zycore_INCLUDE_DIR}
+    ${zydis_INCLUDE_DIR}
 )
