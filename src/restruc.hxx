@@ -95,7 +95,7 @@ namespace rstc {
 
     private:
         void
-        add_function(ZydisDecoder const &decoder, Address address, Address end);
+        safe_add_function(ZydisDecoder const &decoder, Address address, Address end);
 
         Address pop_unanalyzed_function();
 

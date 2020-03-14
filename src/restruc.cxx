@@ -53,6 +53,19 @@ static bool is_conditional_jump(ZydisMnemonic mnemonic)
     return false;
 }
 
+static void print_instruction(ZydisDecodedInstruction const &instruction)
+{
+    char buffer[256];
+    ZydisFormatter formatter;
+    ZYAN_THROW(ZydisFormatterInit(&formatter, ZYDIS_FORMATTER_STYLE_INTEL));
+    ZYAN_THROW(ZydisFormatterFormatInstruction(&formatter,
+                                               &instruction,
+                                               buffer,
+                                               sizeof(buffer),
+                                               0));
+    std::cout << buffer << '\n';
+}
+
 Restruc::Function::Function()
     : entry_point(nullptr)
 {
@@ -71,6 +84,9 @@ Restruc::Function::Function(ZydisDecoder const &decoder,
                                             address,
                                             ZYDIS_MAX_INSTRUCTION_LENGTH,
                                             &instruction));
+#ifndef NDEBUG
+        print_instruction(instruction);
+#endif
         visit(address);
         instructions_.emplace(address, instruction);
         Address next_address = address + instruction.length;
@@ -175,10 +191,14 @@ Restruc::Restruc(std::filesystem::path const &pe_path)
 {
 }
 
-void Restruc::add_function(ZydisDecoder const &decoder,
-                           Address address,
-                           Address end)
+void Restruc::safe_add_function(ZydisDecoder const &decoder,
+                                Address address,
+                                Address end)
 {
+    // Prevent recursive analysis
+    if (functions_.find(address) != functions_.end()) {
+        return;
+    }
     functions_.emplace(address, Function(decoder, address, end));
     unanalyzed_functions_.push_back(address);
 }
@@ -197,14 +217,14 @@ void Restruc::analyze()
                                 ZYDIS_MACHINE_MODE_LONG_64,
                                 ZYDIS_ADDRESS_WIDTH_64));
 
-    add_function(decoder, pe_.get_entry_point(), nullptr);
+    safe_add_function(decoder, pe_.get_entry_point(), nullptr);
     while (!unanalyzed_functions_.empty()) {
         auto &function = functions_[pop_unanalyzed_function()];
         for (auto [_, call] : function.get_calls()) {
-            add_function(decoder, call.dst, nullptr);
+            safe_add_function(decoder, call.dst, nullptr);
         }
         for (auto [_, jump] : function.get_outer_jumps()) {
-            add_function(decoder, jump.dst, nullptr);
+            safe_add_function(decoder, jump.dst, nullptr);
         }
     }
 }
