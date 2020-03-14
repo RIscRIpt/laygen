@@ -27,7 +27,7 @@ rstc::Restruc::Function::Function()
 {
 }
 
-Restruc::Function::Function(ZydisDecoder const &decoder, BYTE *address)
+Restruc::Function::Function(ZydisDecoder const &decoder, Address address)
     : address(address)
 {
     // TODO: analyze bounds
@@ -38,25 +38,33 @@ Restruc::Function::Function(ZydisDecoder const &decoder, BYTE *address)
                                             ZYDIS_MAX_INSTRUCTION_LENGTH,
                                             &instruction));
         instructions_.push_back(instruction);
+        Address next_address = address + instruction.length;
         if (is_jump_mnemonic(instruction.mnemonic)) {
-            jumps_.emplace_back(address,
-                                address + instruction.operands[0].imm.value.s);
+            Address dest = address + instruction.operands[0].imm.value.s;
+            jumps_inside_.emplace(dest, Jump(address, dest));
         }
         else if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL) {
-            calls_.emplace_back(address,
-                                address + instruction.operands[0].imm.value.s);
+            Address dest = address + instruction.operands[0].imm.value.s;
+            calls_.emplace(dest, Call(address, dest, next_address));
         }
-        // TODO: analyze jumps
-        if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
-            break;
+        else if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
+            if (jumps_inside_.find(next_address) == jumps_inside_.end()) {
+                break;
+            }
         }
-        address += instruction.length;
+        address = next_address;
     }
 }
 
 Restruc::Restruc(std::filesystem::path const &pe_path)
     : pe_(pe_path)
 {
+}
+
+void Restruc::add_function(ZydisDecoder const &decoder, Address address)
+{
+    unvisited_functions_.insert(address);
+    functions_.emplace(address, Function(decoder, address));
 }
 
 void Restruc::analyze()
@@ -66,14 +74,14 @@ void Restruc::analyze()
                                 ZYDIS_MACHINE_MODE_LONG_64,
                                 ZYDIS_ADDRESS_WIDTH_64));
 
-    unvisited_functions_.insert(pe_.get_entry_point());
-    functions_.emplace(pe_.get_entry_point(),
-                       Function(decoder, pe_.get_entry_point()));
+    add_function(decoder, pe_.get_entry_point());
     for (auto unvisited_function_address : unvisited_functions_) {
         auto &function = functions_[unvisited_function_address];
-        for (auto call : function.get_calls()) {
-            unvisited_functions_.insert(call.to);
-            functions_.emplace(call.to, Function(decoder, call.to));
+        for (auto [_, call] : function.get_calls()) {
+            add_function(decoder, call.to);
+        }
+        for (auto [_, jump] : function.get_jumps_outside()) {
+            add_function(decoder, jump.to);
         }
     }
 }
