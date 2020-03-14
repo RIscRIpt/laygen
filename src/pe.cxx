@@ -37,12 +37,12 @@ PIMAGE_FILE_HEADER PE::image_file_header()
 
 PIMAGE_OPTIONAL_HEADER32 PE::image_optional_header32()
 {
-    return &reinterpret_cast<PIMAGE_NT_HEADERS32>(data())->OptionalHeader;
+    return &reinterpret_cast<PIMAGE_NT_HEADERS32>(image_nt_headers())->OptionalHeader;
 }
 
 PIMAGE_OPTIONAL_HEADER64 PE::image_optional_header64()
 {
-    return &reinterpret_cast<PIMAGE_NT_HEADERS64>(data())->OptionalHeader;
+    return &reinterpret_cast<PIMAGE_NT_HEADERS64>(image_nt_headers())->OptionalHeader;
 }
 
 PE::Sections PE::image_sections()
@@ -62,24 +62,25 @@ BYTE *PE::get_entry_point()
     default: throw std::runtime_error("unsupported architecture");
     }
     auto first_section = image_first_section();
-    std::vector<PIMAGE_SECTION_HEADER> sections(
-        first_section,
-        first_section + file_header->NumberOfSections);
+    std::vector<PIMAGE_SECTION_HEADER> sections(file_header->NumberOfSections);
+    for (size_t i = 0; i < sections.size(); i++) {
+        sections[i] = &first_section[i];
+    }
     std::sort(sections.begin(),
               sections.end(),
               [](PIMAGE_SECTION_HEADER a, PIMAGE_SECTION_HEADER b) {
                   return a->VirtualAddress < b->VirtualAddress;
               });
-    auto lb = std::lower_bound(sections.begin(),
+    auto pentry_section = std::upper_bound(sections.begin(),
                                sections.end(),
                                entry_point,
-                               [](PIMAGE_SECTION_HEADER section, DWORD entry) {
-                                   return section->VirtualAddress < entry;
+                               [](DWORD entry, PIMAGE_SECTION_HEADER section) {
+                                   return entry < section->VirtualAddress;
                                });
-    if (lb == sections.end()) {
+    if (pentry_section == sections.begin()) {
         throw std::runtime_error("failed to find entry point");
     }
-    auto entry_section = *lb;
+    auto entry_section = *(pentry_section - 1);
     return data() + entry_section->PointerToRawData + entry_point - entry_section->VirtualAddress;
 }
 
