@@ -17,11 +17,6 @@ using namespace rstc;
         }                              \
     } while (0)
 
-bool is_jump_mnemonic(ZydisMnemonic mnemonic)
-{
-    return false;
-}
-
 rstc::Restruc::Function::Function()
     : address(nullptr)
 {
@@ -31,6 +26,7 @@ Restruc::Function::Function(ZydisDecoder const &decoder, Address address)
     : address(address)
 {
     // TODO: analyze bounds
+    // TODO: find jumps_outside_
     while (true) {
         ZydisDecodedInstruction instruction;
         ZYAN_THROW(ZydisDecoderDecodeBuffer(&decoder,
@@ -39,9 +35,10 @@ Restruc::Function::Function(ZydisDecoder const &decoder, Address address)
                                             &instruction));
         instructions_.push_back(instruction);
         Address next_address = address + instruction.length;
-        if (is_jump_mnemonic(instruction.mnemonic)) {
+        if (instruction.mnemonic == ZYDIS_MNEMONIC_JMP) {
             Address dest = address + instruction.operands[0].imm.value.s;
             jumps_inside_.emplace(dest, Jump(address, dest));
+            next_address = dest;
         }
         else if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL) {
             Address dest = address + instruction.operands[0].imm.value.s;
