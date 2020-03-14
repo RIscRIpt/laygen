@@ -41,6 +41,7 @@ namespace rstc {
 
     private:
         PIMAGE_NT_HEADERS image_nt_headers();
+        PIMAGE_SECTION_HEADER image_first_section();
 
         Bytes bytes_;
     };
