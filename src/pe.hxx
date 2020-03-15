@@ -36,14 +36,21 @@ namespace rstc {
         PIMAGE_OPTIONAL_HEADER64 image_optional_header64();
         Sections image_sections();
 
+        BYTE *virtual_to_raw_address(DWORD va);
+        DWORD raw_to_virtual_address(BYTE *pointer);
+
         BYTE *get_entry_point();
-        BYTE *get_section_data(IMAGE_SECTION_HEADER const &section);
+
+        BYTE *get_end(BYTE *pointer);
 
     private:
         PIMAGE_NT_HEADERS image_nt_headers();
         PIMAGE_SECTION_HEADER image_first_section();
+        PIMAGE_SECTION_HEADER get_section_by_raw_address(BYTE *pointer);
 
         Bytes bytes_;
+        std::vector<PIMAGE_SECTION_HEADER> sections_by_va_;
+        std::vector<PIMAGE_SECTION_HEADER> sections_by_raw_data_;
     };
 
 }
