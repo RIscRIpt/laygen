@@ -18,49 +18,16 @@ using namespace rstc;
         }                              \
     } while (0)
 
-static bool is_conditional_jump(ZydisMnemonic mnemonic)
+void Restruc::PotentialSubCFGraphs::add(std::unique_ptr<CFGraph> &&sub_cfgraph)
 {
-    switch (mnemonic) {
-    case ZYDIS_MNEMONIC_JB:
-    case ZYDIS_MNEMONIC_JBE:
-    case ZYDIS_MNEMONIC_JCXZ:
-    case ZYDIS_MNEMONIC_JECXZ:
-    case ZYDIS_MNEMONIC_JKNZD:
-    case ZYDIS_MNEMONIC_JKZD:
-    case ZYDIS_MNEMONIC_JL:
-    case ZYDIS_MNEMONIC_JLE:
-    case ZYDIS_MNEMONIC_JMP:
-    case ZYDIS_MNEMONIC_JNB:
-    case ZYDIS_MNEMONIC_JNBE:
-    case ZYDIS_MNEMONIC_JNL:
-    case ZYDIS_MNEMONIC_JNLE:
-    case ZYDIS_MNEMONIC_JNO:
-    case ZYDIS_MNEMONIC_JNP:
-    case ZYDIS_MNEMONIC_JNS:
-    case ZYDIS_MNEMONIC_JNZ:
-    case ZYDIS_MNEMONIC_JO:
-    case ZYDIS_MNEMONIC_JP:
-    case ZYDIS_MNEMONIC_JRCXZ:
-    case ZYDIS_MNEMONIC_JS:
-    case ZYDIS_MNEMONIC_JZ:
-        // Jxx
-        return true;
-    case ZYDIS_MNEMONIC_LOOP:
-    case ZYDIS_MNEMONIC_LOOPE:
-    case ZYDIS_MNEMONIC_LOOPNE:
-        // LOOPxx
-        return true;
-    }
-    return false;
+    // TODO
 }
 
-void Restruc::Flow::merge(Flow &other)
+std::vector<std::unique_ptr<Restruc::CFGraph>>
+Restruc::PotentialSubCFGraphs::extract(Address dst)
 {
-    instructions.merge(other.instructions);
-    impl::merge_keeping_src_unique(inner_jumps, other.inner_jumps);
-    impl::merge_keeping_src_unique(outer_jumps, other.outer_jumps);
-    impl::merge_keeping_src_unique(unknown_jumps, other.unknown_jumps);
-    impl::merge_keeping_src_unique(calls, other.calls);
+    // TODO
+    return {};
 }
 
 Restruc::CFGraph::CFGraph()
@@ -100,7 +67,7 @@ bool Restruc::CFGraph::can_merge_with_outer_cfgraph() const
                   + last_outer_instruction.second.length;
 }
 
-Address Restruc::CFGraph::analyze(Address address)
+Restruc::CFGraph::AnalysisResult Restruc::CFGraph::analyze(Address address)
 {
     auto const &instruction = instructions[address];
     Address next_address = address + instruction.length;
@@ -113,7 +80,7 @@ Address Restruc::CFGraph::analyze(Address address)
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
         has_ret = true;
         if (!is_inside(next_address)) {
-            next_address = nullptr;
+            return { Complete, nullptr };
         }
     }
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_JMP
@@ -126,28 +93,106 @@ Address Restruc::CFGraph::analyze(Address address)
         if (unconditional) {
             switch (type) {
             case Jump::Unknown:
-                if (promote_unknown_jump(next_address, Jump::Inner)) {
-                    return next_address;
-                }
-                else {
-                    return nullptr;
+                if (!promote_unknown_jump(next_address, Jump::Inner)) {
+                    return { UnknownJump, nullptr };
                 }
                 break;
             case Jump::Inner:
-                if (dst >= next_address) {
-                    return next_address;
-                }
-                else {
+                if (dst < next_address) {
                     // Looping inside CFGraph
-                    return nullptr;
+                    return { InnerJump, nullptr };
                 }
+                break;
             case Jump::Outer:
                 //
-                return nullptr;
+                return { OuterJump, nullptr };
             }
         }
     }
-    return next_address;
+    else {
+        auto sp_status = analyze_stack_pointer_manipulation(instruction);
+        if (sp_status == SPModified) {
+            stack_was_modified = true;
+        }
+    }
+    return { Next, next_address };
+}
+
+bool Restruc::CFGraph::is_conditional_jump(ZydisMnemonic mnemonic)
+{
+    switch (mnemonic) {
+    case ZYDIS_MNEMONIC_JB:
+    case ZYDIS_MNEMONIC_JBE:
+    case ZYDIS_MNEMONIC_JCXZ:
+    case ZYDIS_MNEMONIC_JECXZ:
+    case ZYDIS_MNEMONIC_JKNZD:
+    case ZYDIS_MNEMONIC_JKZD:
+    case ZYDIS_MNEMONIC_JL:
+    case ZYDIS_MNEMONIC_JLE:
+    case ZYDIS_MNEMONIC_JMP:
+    case ZYDIS_MNEMONIC_JNB:
+    case ZYDIS_MNEMONIC_JNBE:
+    case ZYDIS_MNEMONIC_JNL:
+    case ZYDIS_MNEMONIC_JNLE:
+    case ZYDIS_MNEMONIC_JNO:
+    case ZYDIS_MNEMONIC_JNP:
+    case ZYDIS_MNEMONIC_JNS:
+    case ZYDIS_MNEMONIC_JNZ:
+    case ZYDIS_MNEMONIC_JO:
+    case ZYDIS_MNEMONIC_JP:
+    case ZYDIS_MNEMONIC_JRCXZ:
+    case ZYDIS_MNEMONIC_JS:
+    case ZYDIS_MNEMONIC_JZ:
+        // Jxx
+    case ZYDIS_MNEMONIC_LOOP:
+    case ZYDIS_MNEMONIC_LOOPE:
+    case ZYDIS_MNEMONIC_LOOPNE:
+        // LOOPxx
+        return true;
+    }
+    return false;
+}
+
+Restruc::CFGraph::SPManipulationType
+Restruc::CFGraph::analyze_stack_pointer_manipulation(
+    ZydisDecodedInstruction const &instruction)
+{
+    if (instruction.operand_count == 2) {
+        auto const &dst = instruction.operands[0];
+        auto const &src = instruction.operands[1];
+        if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER
+            && dst.reg.value == ZYDIS_REGISTER_RSP) {
+            if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                switch (instruction.mnemonic) {
+                case ZYDIS_MNEMONIC_ADD:
+                    stack_depth -= src.imm.value.s;
+                    return SPModified;
+                case ZYDIS_MNEMONIC_SUB:
+                    stack_depth += src.imm.value.s;
+                    return SPModified;
+                default: stack_depth = -1; return SPAmbiguous;
+                }
+            }
+            else {
+                stack_depth = -1;
+                return SPAmbiguous;
+            }
+        }
+    }
+    else {
+        switch (instruction.mnemonic) {
+        case ZYDIS_MNEMONIC_PUSH: stack_depth += 8; return SPModified;
+        case ZYDIS_MNEMONIC_PUSHF: stack_depth += 2; return SPModified;
+        case ZYDIS_MNEMONIC_PUSHFD: stack_depth += 4; return SPModified;
+        case ZYDIS_MNEMONIC_PUSHFQ: stack_depth += 8; return SPModified;
+
+        case ZYDIS_MNEMONIC_POP: stack_depth -= 8; return SPModified;
+        case ZYDIS_MNEMONIC_POPF: stack_depth -= 2; return SPModified;
+        case ZYDIS_MNEMONIC_POPFD: stack_depth -= 4; return SPModified;
+        case ZYDIS_MNEMONIC_POPFQ: stack_depth -= 8; return SPModified;
+        }
+    }
+    return SPUnmodified;
 }
 
 void Restruc::CFGraph::add_instruction(
@@ -208,7 +253,7 @@ void Restruc::CFGraph::visit(Address address)
 }
 
 Restruc::Jump::Type
-Restruc::CFGraph::get_jump_type(Address dst, Address src, Address next)
+Restruc::CFGraph::get_jump_type(Address dst, Address src, Address next) const
 {
     // If jumping with offset 0, i.e. no jump
     if (dst == next) {
@@ -216,6 +261,7 @@ Restruc::CFGraph::get_jump_type(Address dst, Address src, Address next)
     }
     // If jump is first function instruction
     if (instructions.size() == 1) {
+        // Assume JMP table
         return Jump::Outer;
     }
     // If destination is one of the previous instructions
@@ -224,12 +270,40 @@ Restruc::CFGraph::get_jump_type(Address dst, Address src, Address next)
     }
     // If jumping above entry-point
     if (dst < entry_point) {
+        // Assume no inner jumps are made above entry-point
         return Jump::Outer;
+    }
+    if (!stack_depth_is_ambiguous()) {
+        if (stack_depth != 0) {
+            // Assume no outer jumps are made with dirty stack
+            return Jump::Inner;
+        }
+        else {
+            // If stack depth was modified previously, and returned to 0
+            // Assume outer jump (optimized tail call).
+            if (stack_was_modified) {
+                return Jump::Outer;
+            }
+        }
     }
     return Jump::Unknown;
 }
 
-bool Restruc::CFGraph::is_inside(Address address)
+bool Restruc::CFGraph::stack_depth_is_ambiguous() const
+{
+    return stack_depth == -1;
+}
+
+void Restruc::CFGraph::merge(CFGraph &other)
+{
+    instructions.merge(other.instructions);
+    impl::merge_keeping_src_unique(inner_jumps, other.inner_jumps);
+    impl::merge_keeping_src_unique(outer_jumps, other.outer_jumps);
+    impl::merge_keeping_src_unique(unknown_jumps, other.unknown_jumps);
+    impl::merge_keeping_src_unique(calls, other.calls);
+}
+
+bool Restruc::CFGraph::is_inside(Address address) const
 {
     return instructions.find(address) != instructions.end()
            || inner_jumps.find(address) != inner_jumps.end();
@@ -275,7 +349,8 @@ void Restruc::fill_cfgraph(CFGraph &cfgraph)
 #endif
 
         cfgraph.add_instruction(address, instruction);
-        next_address = cfgraph.analyze(address);
+        auto analysis_status = cfgraph.analyze(address);
+        next_address = analysis_status.next_address;
     }
 }
 
@@ -288,12 +363,13 @@ void Restruc::resolve_incomplete_cfgraph(CFGraph &outer_cfgraph)
     while (!outer_cfgraph.unknown_jumps.empty()) {
         auto const unknown_jump_dst =
             outer_cfgraph.unknown_jumps.begin()->first;
-        CFGraph new_cfgraph(unknown_jump_dst, &outer_cfgraph);
+        auto new_cfgraph =
+            std::make_unique<CFGraph>(unknown_jump_dst, &outer_cfgraph);
         Address address;
-        Address next_address = new_cfgraph.entry_point;
-        Address end = pe_.get_end(new_cfgraph.entry_point);
-        bool can_merge = false;
-        while (!can_merge) {
+        Address next_address = new_cfgraph->entry_point;
+        Address end = pe_.get_end(new_cfgraph->entry_point);
+        bool done = false;
+        while (!done) {
             address = next_address;
             if (address == nullptr || address >= end) {
                 break;
@@ -310,16 +386,28 @@ void Restruc::resolve_incomplete_cfgraph(CFGraph &outer_cfgraph)
                              instruction);
 #endif
 
-            new_cfgraph.add_instruction(address, instruction);
-            next_address = new_cfgraph.analyze(address);
-            can_merge = new_cfgraph.can_merge_with_outer_cfgraph();
-        }
-        if (can_merge) {
-            outer_cfgraph.merge(new_cfgraph);
-            break;
-        }
-        else {
-            outer_cfgraph.promote_unknown_jump(unknown_jump_dst, Jump::Outer);
+            new_cfgraph->add_instruction(address, instruction);
+            auto analysis_status = new_cfgraph->analyze(address);
+            next_address = analysis_status.next_address;
+            switch (analysis_status.status) {
+            case CFGraph::Next: break;
+            case CFGraph::UnknownJump:
+                outer_cfgraph.potential_sub_cfgraphs.add(
+                    std::move(new_cfgraph));
+                done = true;
+                break;
+            case CFGraph::InnerJump:
+            case CFGraph::Complete:
+                // can_merge = new_cfgraph->can_merge_with_outer_cfgraph();
+                outer_cfgraph.merge(*new_cfgraph);
+                done = true;
+                break;
+            case CFGraph::OuterJump:
+                outer_cfgraph.promote_unknown_jump(unknown_jump_dst,
+                                                   Jump::Outer);
+                done = true;
+                break;
+            }
         }
     }
 }
@@ -332,16 +420,16 @@ void Restruc::create_function(Address entry_point)
     }
 
     Address address = entry_point;
-    CFGraph cfgraph(entry_point);
+    auto cfgraph = std::make_unique<CFGraph>(entry_point);
     while (true) {
-        fill_cfgraph(cfgraph);
-        if (cfgraph.is_complete()) {
+        fill_cfgraph(*cfgraph);
+        if (cfgraph->is_complete()) {
             break;
         }
-        resolve_incomplete_cfgraph(cfgraph);
+        resolve_incomplete_cfgraph(*cfgraph);
     }
 
-    functions_.emplace(entry_point, cfgraph);
+    functions_.emplace(entry_point, std::move(cfgraph));
     unanalyzed_functions_.push_back(entry_point);
 }
 
@@ -359,17 +447,17 @@ void Restruc::analyze()
         auto &function = functions_[pop_unanalyzed_function()];
 
         // Iterate over unique call destinations
-        for (auto it = function.calls.begin(), end = function.calls.end();
+        for (auto it = function->calls.begin(), end = function->calls.end();
              it != end;
-             it = function.calls.upper_bound(it->first)) {
+             it = function->calls.upper_bound(it->first)) {
             create_function(it->second.dst);
         }
 
         // Iterate over unique outer jumps
-        for (auto it = function.outer_jumps.begin(),
-                  end = function.outer_jumps.end();
+        for (auto it = function->outer_jumps.begin(),
+                  end = function->outer_jumps.end();
              it != end;
-             it = function.outer_jumps.upper_bound(it->first)) {
+             it = function->outer_jumps.upper_bound(it->first)) {
             create_function(it->second.dst);
         }
     }
@@ -379,9 +467,9 @@ void Restruc::analyze()
 
 void Restruc::debug(std::ostream &os)
 {
-    auto address = pe_.get_entry_point();
+    auto address = pe_.virtual_to_raw_address(0x182D0);
     create_function(address);
-    dump_function(os, formatter_, functions_[address]);
+    dump_function(os, formatter_, *functions_[address]);
 }
 
 void Restruc::dump_instruction(std::ostream &os,

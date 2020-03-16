@@ -6,6 +6,7 @@
 
 #include <deque>
 #include <map>
+#include <memory>
 #include <set>
 
 namespace rstc {
@@ -45,27 +46,57 @@ namespace rstc {
         using Calls = std::multimap<Address, Call>;
 
     private:
-        struct Flow {
+        struct CFGraph;
+        struct PotentialSubCFGraphs {
+            void add(std::unique_ptr<CFGraph> &&sub_cfgraph);
+            std::vector<std::unique_ptr<CFGraph>> extract(Address dst);
+        };
+
+        struct CFGraph {
+            Address const entry_point;
             Instructions instructions;
             Jumps inner_jumps;
             Jumps outer_jumps;
             Jumps unknown_jumps;
             Calls calls;
             bool has_ret = false;
+            int stack_depth = 0;
+            bool stack_was_modified = false;
 
-            void merge(Flow &other);
-        };
+            enum AnalysisStatus
+            {
+                Next,
+                UnknownJump,
+                InnerJump,
+                OuterJump,
+                Complete,
+            };
 
-        struct CFGraph : public Flow {
+            enum SPManipulationType {
+                SPModified,
+                SPUnmodified,
+                SPAmbiguous,
+            };
+
+            struct AnalysisResult {
+                AnalysisStatus const status;
+                Address const next_address;
+            };
+
+            CFGraph *const outer_cfgraph;
+
+            PotentialSubCFGraphs potential_sub_cfgraphs;
+
             CFGraph();
             CFGraph(Address entry_point, CFGraph *outer_cfgraph = nullptr);
 
-            Address const entry_point;
-            CFGraph *const outer_cfgraph;
-
             bool is_complete() const;
             bool can_merge_with_outer_cfgraph() const;
-            Address analyze(Address address);
+            AnalysisResult analyze(Address address);
+            SPManipulationType analyze_stack_pointer_manipulation(
+                ZydisDecodedInstruction const &instruction);
+
+            static bool is_conditional_jump(ZydisMnemonic mnemonic);
 
             void add_instruction(Address address,
                                  ZydisDecodedInstruction const &instruction);
@@ -73,20 +104,16 @@ namespace rstc {
             void add_call(Address dst, Address src, Address ret);
 
             void visit(Address address);
-            bool is_inside(Address address);
+            bool is_inside(Address address) const;
             bool promote_unknown_jump(Address dst, Jump::Type new_type);
             bool promote_outer_unknown_jump(Address dst, Jump::Type new_type);
-            Jump::Type get_jump_type(Address dst, Address src, Address next);
+            Jump::Type get_jump_type(Address dst, Address src, Address next) const;
+            bool stack_depth_is_ambiguous() const;
+
+            void merge(CFGraph &other);
         };
 
     public:
-        class Function : private Flow {
-        public:
-            Function(Instructions &&instructions);
-
-            inline Jumps const &get_outer_jumps() const { return outer_jumps; }
-        };
-
         Restruc(std::filesystem::path const &pe_path);
 
         void analyze();
@@ -115,7 +142,7 @@ namespace rstc {
 
         PE pe_;
 
-        std::map<Address, CFGraph> functions_;
+        std::map<Address, std::unique_ptr<CFGraph>> functions_;
         std::deque<Address> unanalyzed_functions_;
     };
 
