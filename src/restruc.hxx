@@ -4,10 +4,13 @@
 
 #include <Zydis/Zydis.h>
 
+#include <atomic>
 #include <deque>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
+#include <thread>
 
 namespace rstc {
 
@@ -46,12 +49,6 @@ namespace rstc {
         using Calls = std::multimap<Address, Call>;
 
     private:
-        struct CFGraph;
-        struct PotentialSubCFGraphs {
-            void add(std::unique_ptr<CFGraph> &&sub_cfgraph);
-            std::vector<std::unique_ptr<CFGraph>> extract(Address dst);
-        };
-
         struct CFGraph {
             Address const entry_point;
             Instructions instructions;
@@ -63,8 +60,7 @@ namespace rstc {
             int stack_depth = 0;
             bool stack_was_modified = false;
 
-            enum AnalysisStatus
-            {
+            enum AnalysisStatus {
                 Next,
                 UnknownJump,
                 InnerJump,
@@ -83,15 +79,11 @@ namespace rstc {
                 Address const next_address;
             };
 
-            CFGraph *const outer_cfgraph;
-
-            PotentialSubCFGraphs potential_sub_cfgraphs;
-
             CFGraph();
-            CFGraph(Address entry_point, CFGraph *outer_cfgraph = nullptr);
+            CFGraph(Address entry_point);
 
             bool is_complete() const;
-            bool can_merge_with_outer_cfgraph() const;
+            bool is_jump_table_entry() const;
             AnalysisResult analyze(Address address);
             SPManipulationType analyze_stack_pointer_manipulation(
                 ZydisDecodedInstruction const &instruction);
@@ -106,34 +98,39 @@ namespace rstc {
             void visit(Address address);
             bool is_inside(Address address) const;
             bool promote_unknown_jump(Address dst, Jump::Type new_type);
-            bool promote_outer_unknown_jump(Address dst, Jump::Type new_type);
-            Jump::Type get_jump_type(Address dst, Address src, Address next) const;
+            Jump::Type
+            get_jump_type(Address dst, Address src, Address next) const;
             bool stack_depth_is_ambiguous() const;
-
-            void merge(CFGraph &other);
         };
 
     public:
         Restruc(std::filesystem::path const &pe_path);
 
         void analyze();
+        void set_max_analyzing_threads(size_t amount);
 
 #ifndef NDEBUG
         void debug(std::ostream &os);
         void dump_instruction(std::ostream &os,
                               DWORD va,
                               ZydisDecodedInstruction const &instruction);
-        void dump_function(std::ostream &os,
-                           ZydisFormatter const &formatter,
-                           CFGraph const &function);
+        void dump_cfgraph(std::ostream &os,
+                          ZydisFormatter const &formatter,
+                          CFGraph const &cfgraph);
 #endif
 
     private:
         void fill_cfgraph(CFGraph &cfgraph);
-        void resolve_incomplete_cfgraph(CFGraph &cfgraph);
-        void create_function(Address entry_point);
+        void post_fill_cfgraph(CFGraph &cfgraph);
+        void analyze_cfgraph(Address entry_point);
+        void post_analyze_cfgraph(CFGraph &cfgraph);
+        void find_and_analyze_cfgraphs();
+        void promote_jumps_to_outer();
+        void promote_jumps_to_inner();
+        void post_analyze_cfgraphs();
+        void wait_for_all_analyzing_threads();
 
-        Address pop_unanalyzed_function();
+        Address pop_unanalyzed_cfgraph();
 
         ZydisDecoder decoder_;
 #ifndef NDEBUG
@@ -142,42 +139,15 @@ namespace rstc {
 
         PE pe_;
 
-        std::map<Address, std::unique_ptr<CFGraph>> functions_;
-        std::deque<Address> unanalyzed_functions_;
+        size_t max_analyzing_threads_;
+        std::atomic<size_t> analyzing_threads_count_ = 0;
+        std::mutex creating_cfgraph_mutex_;
+        std::mutex cfgraphs_mutex_;
+        std::condition_variable cfgraphs_cv_;
+        std::vector<std::thread> analyzing_threads_;
+        std::set<Address> created_cfgraphs_;
+        std::map<Address, std::unique_ptr<CFGraph>> cfgraphs_;
+        std::deque<Address> unanalyzed_cfgraphs_;
     };
-
-    namespace impl {
-        /*
-        // clang-format off
-        template<typename T>
-        concept MultimapOfDestinations = requires
-        {
-            { T::value_type::first_type } -> Address;
-            { T::value_type::second_type::dst } -> Address const;
-            { T::value_type::second_type::src } -> Address const;
-        };
-        // clang-format on
-        */
-
-        template</*MultimapOfDestinations*/ typename Map>
-        void merge_keeping_src_unique(Map &dst_map, Map &src_map)
-        {
-            for (auto const &[_, src] : src_map) {
-                bool dst_map_has_src = false;
-                for (auto ii = dst_map.equal_range(src.dst);
-                     ii.first != ii.second;
-                     ++ii.first) {
-                    auto dst_src = ii.first->second.src;
-                    if (dst_src == src.src) {
-                        dst_map_has_src = true;
-                        break;
-                    }
-                }
-                if (!dst_map_has_src) {
-                    dst_map.emplace(src.dst, src);
-                }
-            }
-        }
-    }
 
 }

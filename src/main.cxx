@@ -11,6 +11,7 @@ int wmain(int argc, wchar_t *argv[])
 
     try {
         rstc::Restruc restruc(argv[1]);
+        restruc.set_max_analyzing_threads(128);
 #ifdef NDEBUG
         restruc.analyze();
 #else

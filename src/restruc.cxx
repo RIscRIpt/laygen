@@ -1,12 +1,16 @@
 #include "restruc.hxx"
-
+#include "scope_guard.hxx"
 #include "zyan_error.hxx"
 
 #include <cinttypes>
 #include <cstdio>
+#include <execution>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <string>
+
+//#define DEBUG_ANALYSIS
 
 using namespace rstc;
 
@@ -18,53 +22,29 @@ using namespace rstc;
         }                              \
     } while (0)
 
-void Restruc::PotentialSubCFGraphs::add(std::unique_ptr<CFGraph> &&sub_cfgraph)
-{
-    // TODO
-}
-
-std::vector<std::unique_ptr<Restruc::CFGraph>>
-Restruc::PotentialSubCFGraphs::extract(Address dst)
-{
-    // TODO
-    return {};
-}
-
 Restruc::CFGraph::CFGraph()
     : entry_point(nullptr)
-    , outer_cfgraph(nullptr)
 {
 }
 
-Restruc::CFGraph::CFGraph(Address entry_point, CFGraph *outer_cfgraph)
+Restruc::CFGraph::CFGraph(Address entry_point)
     : entry_point(entry_point)
-    , outer_cfgraph(outer_cfgraph)
 {
 }
 
 bool Restruc::CFGraph::is_complete() const
 {
-    return !instructions.empty() && unknown_jumps.empty() && has_ret;
+    return !instructions.empty() && unknown_jumps.empty() && has_ret
+           || is_jump_table_entry();
 }
 
-bool Restruc::CFGraph::can_merge_with_outer_cfgraph() const
+bool Restruc::CFGraph::is_jump_table_entry() const
 {
-    if (!outer_cfgraph) {
+    if (instructions.size() != 1) {
         return false;
     }
-    if (is_complete()) {
-        return true;
-    }
-    if (instructions.empty()) {
-        return false;
-    }
-    auto const &last_outer_instruction = *outer_cfgraph->instructions.rbegin();
-    auto const &first_instruction = *instructions.begin();
-    // Can merge if first instruction of this CFGraph is comes right
-    // after the last instruction of outer CFGraph.
-    return first_instruction.first
-           == last_outer_instruction.first
-                  + last_outer_instruction.second.length;
+    auto const &i = instructions.begin()->second;
+    return i.mnemonic == ZYDIS_MNEMONIC_JMP;
 }
 
 Restruc::CFGraph::AnalysisResult Restruc::CFGraph::analyze(Address address)
@@ -237,19 +217,9 @@ bool Restruc::CFGraph::promote_unknown_jump(Address dst, Jump::Type new_type)
     return promoted;
 }
 
-bool Restruc::CFGraph::promote_outer_unknown_jump(Address dst,
-                                                  Jump::Type new_type)
-{
-    if (!outer_cfgraph) {
-        return false;
-    }
-    return outer_cfgraph->promote_unknown_jump(dst, new_type);
-}
-
 void Restruc::CFGraph::visit(Address address)
 {
     promote_unknown_jump(address, Jump::Inner);
-    promote_outer_unknown_jump(address, Jump::Inner);
 }
 
 Restruc::Jump::Type
@@ -259,13 +229,13 @@ Restruc::CFGraph::get_jump_type(Address dst, Address src, Address next) const
     if (dst == next) {
         return Jump::Inner;
     }
-    // If jump is first function instruction
+    // If jump is first cfgraph instruction
     if (instructions.size() == 1) {
         // Assume JMP table
         return Jump::Outer;
     }
     // If destination is one of the previous instructions
-    if (instructions.find(dst) != instructions.end()) {
+    if (instructions.contains(dst)) {
         return Jump::Inner;
     }
     // If jumping above entry-point
@@ -294,23 +264,14 @@ bool Restruc::CFGraph::stack_depth_is_ambiguous() const
     return stack_depth == -1;
 }
 
-void Restruc::CFGraph::merge(CFGraph &other)
-{
-    instructions.merge(other.instructions);
-    impl::merge_keeping_src_unique(inner_jumps, other.inner_jumps);
-    impl::merge_keeping_src_unique(outer_jumps, other.outer_jumps);
-    impl::merge_keeping_src_unique(unknown_jumps, other.unknown_jumps);
-    impl::merge_keeping_src_unique(calls, other.calls);
-}
-
 bool Restruc::CFGraph::is_inside(Address address) const
 {
-    return instructions.find(address) != instructions.end()
-           || inner_jumps.find(address) != inner_jumps.end();
+    return instructions.contains(address) || inner_jumps.contains(address);
 }
 
 Restruc::Restruc(std::filesystem::path const &pe_path)
     : pe_(pe_path)
+    , max_analyzing_threads_(std::thread::hardware_concurrency())
 {
     ZYAN_THROW(ZydisDecoderInit(&decoder_,
                                 ZYDIS_MACHINE_MODE_LONG_64,
@@ -342,7 +303,7 @@ void Restruc::fill_cfgraph(CFGraph &cfgraph)
                                             address,
                                             end - address,
                                             &instruction));
-#ifndef NDEBUG
+#ifdef DEBUG_ANALYSIS
         dump_instruction(std::clog,
                          pe_.raw_to_virtual_address(address),
                          instruction);
@@ -354,122 +315,199 @@ void Restruc::fill_cfgraph(CFGraph &cfgraph)
     }
 }
 
-void Restruc::resolve_incomplete_cfgraph(CFGraph &outer_cfgraph)
+void Restruc::post_fill_cfgraph(CFGraph &cfgraph)
 {
-    if (outer_cfgraph.instructions.empty()
-        || outer_cfgraph.unknown_jumps.empty()) {
-        return;
-    }
-    while (!outer_cfgraph.unknown_jumps.empty()) {
-        auto const unknown_jump_dst =
-            outer_cfgraph.unknown_jumps.begin()->first;
-        auto new_cfgraph =
-            std::make_unique<CFGraph>(unknown_jump_dst, &outer_cfgraph);
-        Address address;
-        Address next_address = new_cfgraph->entry_point;
-        Address end = pe_.get_end(new_cfgraph->entry_point);
-        bool done = false;
-        while (!done) {
-            address = next_address;
-            if (address == nullptr || address >= end) {
-                break;
-            }
-
-            ZydisDecodedInstruction instruction;
-            ZYAN_THROW(ZydisDecoderDecodeBuffer(&decoder_,
-                                                address,
-                                                end - address,
-                                                &instruction));
-#ifndef NDEBUG
-            dump_instruction(std::clog,
-                             pe_.raw_to_virtual_address(address),
-                             instruction);
-#endif
-
-            new_cfgraph->add_instruction(address, instruction);
-            auto analysis_status = new_cfgraph->analyze(address);
-            next_address = analysis_status.next_address;
-            switch (analysis_status.status) {
-            case CFGraph::Next: break;
-            case CFGraph::UnknownJump:
-                outer_cfgraph.potential_sub_cfgraphs.add(
-                    std::move(new_cfgraph));
-                done = true;
-                break;
-            case CFGraph::InnerJump:
-            case CFGraph::Complete:
-                // can_merge = new_cfgraph->can_merge_with_outer_cfgraph();
-                outer_cfgraph.merge(*new_cfgraph);
-                done = true;
-                break;
-            case CFGraph::OuterJump:
-                outer_cfgraph.promote_unknown_jump(unknown_jump_dst,
-                                                   Jump::Outer);
-                done = true;
-                break;
-            }
-        }
-    }
+    // TODO
 }
 
-void Restruc::create_function(Address entry_point)
+void Restruc::analyze_cfgraph(Address entry_point)
 {
-    // Prevent recursive analysis
-    if (functions_.find(entry_point) != functions_.end()) {
-        return;
-    }
+    ++analyzing_threads_count_;
+    analyzing_threads_.emplace_back([&, entry_point] {
+        try {
+            ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
+                --analyzing_threads_count_;
+                cfgraphs_cv_.notify_all();
+            });
 
-    Address address = entry_point;
-    auto cfgraph = std::make_unique<CFGraph>(entry_point);
+            {
+                std::lock_guard<std::mutex> creating_cfgraph_guard(
+                    creating_cfgraph_mutex_);
+                // Prevent recursive analysis
+                if (created_cfgraphs_.contains(entry_point)) {
+                    return;
+                }
+                created_cfgraphs_.emplace(entry_point);
+            }
+
+            auto cfgraph = std::make_unique<CFGraph>(entry_point);
+            fill_cfgraph(*cfgraph);
+
+            {
+                std::lock_guard<std::mutex> adding_cfgraph_guard(
+                    cfgraphs_mutex_);
+                cfgraphs_.emplace(entry_point, std::move(cfgraph));
+                unanalyzed_cfgraphs_.push_back(entry_point);
+            }
+        }
+        catch (zyan_error const &e) {
+            std::cerr << std::hex << std::setfill('0')
+                      << "Failed to analyze cfgraph " << std::setw(8)
+                      << pe_.raw_to_virtual_address(entry_point) << ", error:\n"
+                      << e.what() << '\n';
+        }
+    });
+}
+
+void Restruc::post_analyze_cfgraph(CFGraph &cfgraph)
+{
+    ++analyzing_threads_count_;
+    analyzing_threads_.emplace_back([&] {
+        try {
+            ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
+                --analyzing_threads_count_;
+                cfgraphs_cv_.notify_all();
+            });
+            post_fill_cfgraph(cfgraph);
+        }
+        catch (zyan_error const &e) {
+            std::cerr << std::hex << std::setfill('0')
+                      << "Failed to post analyze cfgraph " << std::setw(8)
+                      << pe_.raw_to_virtual_address(cfgraph.entry_point)
+                      << ", error:\n"
+                      << e.what() << '\n';
+        }
+    });
+}
+
+Address Restruc::pop_unanalyzed_cfgraph()
+{
+    std::lock_guard<std::mutex> popping_cfgraph_guard(cfgraphs_mutex_);
+    auto address = unanalyzed_cfgraphs_.front();
+    unanalyzed_cfgraphs_.pop_front();
+    return address;
+}
+
+void Restruc::find_and_analyze_cfgraphs()
+{
+    analyze_cfgraph(pe_.get_entry_point());
     while (true) {
-        fill_cfgraph(*cfgraph);
-        if (cfgraph->is_complete()) {
+        if (unanalyzed_cfgraphs_.empty()
+            || analyzing_threads_count_ >= max_analyzing_threads_) {
+            // Wait for all analyzing threads
+            cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_),
+                              [this] { return analyzing_threads_count_ == 0; });
+        }
+        if (analyzing_threads_count_ == 0 && unanalyzed_cfgraphs_.empty()) {
             break;
         }
-        resolve_incomplete_cfgraph(*cfgraph);
-    }
 
-    functions_.emplace(entry_point, std::move(cfgraph));
-    unanalyzed_functions_.push_back(entry_point);
+        auto &cfgraph = cfgraphs_[pop_unanalyzed_cfgraph()];
+
+        // Iterate over unique call destinations
+        for (auto it = cfgraph->calls.begin(), end = cfgraph->calls.end();
+             it != end;
+             it = cfgraph->calls.upper_bound(it->first)) {
+            analyze_cfgraph(it->second.dst);
+        }
+
+        // Iterate over unique outer jumps
+        for (auto it = cfgraph->outer_jumps.begin(),
+                  end = cfgraph->outer_jumps.end();
+             it != end;
+             it = cfgraph->outer_jumps.upper_bound(it->first)) {
+            analyze_cfgraph(it->second.dst);
+        }
+    }
+    wait_for_all_analyzing_threads();
 }
 
-Address Restruc::pop_unanalyzed_function()
+void Restruc::promote_jumps_to_outer()
 {
-    auto address = unanalyzed_functions_.front();
-    unanalyzed_functions_.pop_front();
-    return address;
+    // Promote all unknown jumps to outer jumps
+    // Because we have all functions, and assume that all
+    // unknown jumps from other functions are "outer".
+    for (auto const &[entry_point, cfgraph] : cfgraphs_) {
+        bool needs_post_analysis = false;
+        for (auto ijump = cfgraph->unknown_jumps.begin();
+             ijump != cfgraph->unknown_jumps.end();) {
+            if (cfgraphs_.contains(ijump->second.dst)) {
+                cfgraph->add_jump(Jump::Outer,
+                                  ijump->second.dst,
+                                  ijump->second.src);
+                ijump = cfgraph->unknown_jumps.erase(ijump);
+                needs_post_analysis = true;
+            }
+            else {
+                ++ijump;
+            }
+        }
+        if (needs_post_analysis) {
+            unanalyzed_cfgraphs_.push_back(entry_point);
+        }
+    }
+}
+
+void Restruc::promote_jumps_to_inner()
+{
+    // Promote all unknown jumps to inner jumps,
+    // as some unknown jumps were promoted to outer jumps,
+    // the remaining jumps should be inner jumps.
+    for (auto const &[entry_point, cfgraph] : cfgraphs_) {
+        while (!cfgraph->unknown_jumps.empty()) {
+            auto ijump = cfgraph->unknown_jumps.begin();
+            cfgraph->add_jump(Jump::Inner,
+                              ijump->second.dst,
+                              ijump->second.src);
+            cfgraph->unknown_jumps.erase(ijump);
+        }
+    }
+}
+
+void Restruc::post_analyze_cfgraphs()
+{
+    while (!unanalyzed_cfgraphs_.empty()) {
+        if (analyzing_threads_count_ >= max_analyzing_threads_) {
+            // Wait for all analyzing threads
+            cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_),
+                              [this] { return analyzing_threads_count_ == 0; });
+        }
+        auto &cfgraph = cfgraphs_[pop_unanalyzed_cfgraph()];
+        post_analyze_cfgraph(*cfgraph);
+    }
+    wait_for_all_analyzing_threads();
 }
 
 void Restruc::analyze()
 {
-    create_function(pe_.get_entry_point());
-    while (!unanalyzed_functions_.empty()) {
-        auto &function = functions_[pop_unanalyzed_function()];
+    find_and_analyze_cfgraphs();
+    promote_jumps_to_outer();
+    promote_jumps_to_inner();
+    post_analyze_cfgraphs();
+}
 
-        // Iterate over unique call destinations
-        for (auto it = function->calls.begin(), end = function->calls.end();
-             it != end;
-             it = function->calls.upper_bound(it->first)) {
-            create_function(it->second.dst);
-        }
+void Restruc::wait_for_all_analyzing_threads()
+{
+    std::for_each(std::execution::par_unseq,
+                  analyzing_threads_.begin(),
+                  analyzing_threads_.end(),
+                  [](std::thread &t) { t.join(); });
+    analyzing_threads_.clear();
+}
 
-        // Iterate over unique outer jumps
-        for (auto it = function->outer_jumps.begin(),
-                  end = function->outer_jumps.end();
-             it != end;
-             it = function->outer_jumps.upper_bound(it->first)) {
-            create_function(it->second.dst);
-        }
-    }
+void Restruc::set_max_analyzing_threads(size_t amount)
+{
+    max_analyzing_threads_ = amount;
 }
 
 #ifndef NDEBUG
 
 void Restruc::debug(std::ostream &os)
 {
-    auto address = pe_.virtual_to_raw_address(0x182D0);
-    create_function(address);
-    dump_function(os, formatter_, *functions_[address]);
+    analyze();
+    for (auto const &f : cfgraphs_) {
+        dump_cfgraph(os, formatter_, *f.second);
+    }
 }
 
 void Restruc::dump_instruction(std::ostream &os,
@@ -486,15 +524,15 @@ void Restruc::dump_instruction(std::ostream &os,
        << buffer << '\n';
 }
 
-void Restruc::dump_function(std::ostream &os,
-                            ZydisFormatter const &formatter,
-                            CFGraph const &function)
+void Restruc::dump_cfgraph(std::ostream &os,
+                           ZydisFormatter const &formatter,
+                           CFGraph const &cfgraph)
 {
     char buffer[256];
     os << std::hex << std::setfill('0');
-    os << std::setw(8) << pe_.raw_to_virtual_address(function.entry_point)
+    os << std::setw(8) << pe_.raw_to_virtual_address(cfgraph.entry_point)
        << ":\n";
-    for (auto const &[address, instruction] : function.instructions) {
+    for (auto const &[address, instruction] : cfgraph.instructions) {
         auto va = pe_.raw_to_virtual_address(address);
         dump_instruction(os, va, instruction);
     }
