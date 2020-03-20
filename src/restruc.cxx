@@ -175,6 +175,17 @@ Restruc::CFGraph::analyze_stack_pointer_manipulation(
     return SPUnmodified;
 }
 
+Address Restruc::CFGraph::get_unanalized_inner_jump_dst() const
+{
+    for (auto it = inner_jumps.begin(), end = inner_jumps.end(); it != end;
+         it = inner_jumps.upper_bound(it->first)) {
+        if (!instructions.contains(it->first)) {
+            return it->first;
+        }
+    }
+    return nullptr;
+}
+
 void Restruc::CFGraph::add_instruction(
     Address address,
     ZydisDecodedInstruction const &instruction)
@@ -281,6 +292,17 @@ Restruc::Restruc(std::filesystem::path const &pe_path)
 #endif
 }
 
+ZydisDecodedInstruction Restruc::decode_instruction(Address address,
+                                                    Address end)
+{
+    ZydisDecodedInstruction instruction;
+    ZYAN_THROW(ZydisDecoderDecodeBuffer(&decoder_,
+                                        address,
+                                        end - address,
+                                        &instruction));
+    return instruction;
+}
+
 void Restruc::fill_cfgraph(CFGraph &cfgraph)
 {
     Address address;
@@ -297,18 +319,12 @@ void Restruc::fill_cfgraph(CFGraph &cfgraph)
         if (address == nullptr || address >= end) {
             break;
         }
-
-        ZydisDecodedInstruction instruction;
-        ZYAN_THROW(ZydisDecoderDecodeBuffer(&decoder_,
-                                            address,
-                                            end - address,
-                                            &instruction));
+        auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_ANALYSIS
         dump_instruction(std::clog,
                          pe_.raw_to_virtual_address(address),
                          instruction);
 #endif
-
         cfgraph.add_instruction(address, instruction);
         auto analysis_status = cfgraph.analyze(address);
         next_address = analysis_status.next_address;
@@ -317,7 +333,25 @@ void Restruc::fill_cfgraph(CFGraph &cfgraph)
 
 void Restruc::post_fill_cfgraph(CFGraph &cfgraph)
 {
-    // TODO
+    while (auto address = cfgraph.get_unanalized_inner_jump_dst()) {
+        auto next_address = address;
+        auto end = pe_.get_end(address);
+        while (true) {
+            address = next_address;
+            if (address == nullptr || address >= end) {
+                break;
+            }
+            auto instruction = decode_instruction(address, end);
+#ifdef DEBUG_ANALYSIS
+            dump_instruction(std::clog,
+                             pe_.raw_to_virtual_address(address),
+                             instruction);
+#endif
+            cfgraph.add_instruction(address, instruction);
+            auto analysis_status = cfgraph.analyze(address);
+            next_address = analysis_status.next_address;
+        }
+    }
 }
 
 void Restruc::analyze_cfgraph(Address entry_point)
@@ -347,7 +381,7 @@ void Restruc::analyze_cfgraph(Address entry_point)
                 std::lock_guard<std::mutex> adding_cfgraph_guard(
                     cfgraphs_mutex_);
                 cfgraphs_.emplace(entry_point, std::move(cfgraph));
-                unanalyzed_cfgraphs_.push_back(entry_point);
+                unprocessed_cfgraphs_.push_back(entry_point);
             }
         }
         catch (zyan_error const &e) {
@@ -380,11 +414,11 @@ void Restruc::post_analyze_cfgraph(CFGraph &cfgraph)
     });
 }
 
-Address Restruc::pop_unanalyzed_cfgraph()
+Address Restruc::pop_unprocessed_cfgraph()
 {
     std::lock_guard<std::mutex> popping_cfgraph_guard(cfgraphs_mutex_);
-    auto address = unanalyzed_cfgraphs_.front();
-    unanalyzed_cfgraphs_.pop_front();
+    auto address = unprocessed_cfgraphs_.front();
+    unprocessed_cfgraphs_.pop_front();
     return address;
 }
 
@@ -392,17 +426,17 @@ void Restruc::find_and_analyze_cfgraphs()
 {
     analyze_cfgraph(pe_.get_entry_point());
     while (true) {
-        if (unanalyzed_cfgraphs_.empty()
+        if (unprocessed_cfgraphs_.empty()
             || analyzing_threads_count_ >= max_analyzing_threads_) {
             // Wait for all analyzing threads
             cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_),
                               [this] { return analyzing_threads_count_ == 0; });
         }
-        if (analyzing_threads_count_ == 0 && unanalyzed_cfgraphs_.empty()) {
+        if (analyzing_threads_count_ == 0 && unprocessed_cfgraphs_.empty()) {
             break;
         }
 
-        auto &cfgraph = cfgraphs_[pop_unanalyzed_cfgraph()];
+        auto &cfgraph = cfgraphs_[pop_unprocessed_cfgraph()];
 
         // Iterate over unique call destinations
         for (auto it = cfgraph->calls.begin(), end = cfgraph->calls.end();
@@ -425,10 +459,10 @@ void Restruc::find_and_analyze_cfgraphs()
 void Restruc::promote_jumps_to_outer()
 {
     // Promote all unknown jumps to outer jumps
-    // Because we have all functions, and assume that all
-    // unknown jumps from other functions are "outer".
+    // Because we have all cfgraphs, and we can assume that all
+    // unknown jumps from a cfgraphs is "outer"
+    // if dst is in list of existing cfgraphs_.
     for (auto const &[entry_point, cfgraph] : cfgraphs_) {
-        bool needs_post_analysis = false;
         for (auto ijump = cfgraph->unknown_jumps.begin();
              ijump != cfgraph->unknown_jumps.end();) {
             if (cfgraphs_.contains(ijump->second.dst)) {
@@ -436,14 +470,10 @@ void Restruc::promote_jumps_to_outer()
                                   ijump->second.dst,
                                   ijump->second.src);
                 ijump = cfgraph->unknown_jumps.erase(ijump);
-                needs_post_analysis = true;
             }
             else {
                 ++ijump;
             }
-        }
-        if (needs_post_analysis) {
-            unanalyzed_cfgraphs_.push_back(entry_point);
         }
     }
 }
@@ -454,6 +484,7 @@ void Restruc::promote_jumps_to_inner()
     // as some unknown jumps were promoted to outer jumps,
     // the remaining jumps should be inner jumps.
     for (auto const &[entry_point, cfgraph] : cfgraphs_) {
+        bool needs_post_analysis = !cfgraph->unknown_jumps.empty();
         while (!cfgraph->unknown_jumps.empty()) {
             auto ijump = cfgraph->unknown_jumps.begin();
             cfgraph->add_jump(Jump::Inner,
@@ -461,19 +492,22 @@ void Restruc::promote_jumps_to_inner()
                               ijump->second.src);
             cfgraph->unknown_jumps.erase(ijump);
         }
+        if (needs_post_analysis) {
+            unprocessed_cfgraphs_.push_back(entry_point);
+        }
     }
 }
 
 void Restruc::post_analyze_cfgraphs()
 {
-    while (!unanalyzed_cfgraphs_.empty()) {
+    while (!unprocessed_cfgraphs_.empty()) {
         if (analyzing_threads_count_ >= max_analyzing_threads_) {
             // Wait for all analyzing threads
             cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_), [this] {
                 return analyzing_threads_count_ < max_analyzing_threads_;
             });
         }
-        auto &cfgraph = cfgraphs_[pop_unanalyzed_cfgraph()];
+        auto &cfgraph = cfgraphs_[pop_unprocessed_cfgraph()];
         post_analyze_cfgraph(*cfgraph);
     }
     wait_for_all_analyzing_threads();
@@ -482,9 +516,11 @@ void Restruc::post_analyze_cfgraphs()
 void Restruc::analyze()
 {
     find_and_analyze_cfgraphs();
-    promote_jumps_to_outer();
-    promote_jumps_to_inner();
-    post_analyze_cfgraphs();
+    while (unknown_jumps_exist()) {
+        promote_jumps_to_outer();
+        promote_jumps_to_inner();
+        post_analyze_cfgraphs();
+    }
 }
 
 void Restruc::wait_for_all_analyzing_threads()
@@ -494,6 +530,15 @@ void Restruc::wait_for_all_analyzing_threads()
                   analyzing_threads_.end(),
                   [](std::thread &t) { t.join(); });
     analyzing_threads_.clear();
+}
+
+bool Restruc::unknown_jumps_exist() const
+{
+    return std::any_of(cfgraphs_.cbegin(),
+                       cfgraphs_.cend(),
+                       [this](auto const &cfgraph) {
+                           return !cfgraph.second->unknown_jumps.empty();
+                       });
 }
 
 void Restruc::set_max_analyzing_threads(size_t amount)

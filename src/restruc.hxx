@@ -87,6 +87,7 @@ namespace rstc {
             AnalysisResult analyze(Address address);
             SPManipulationType analyze_stack_pointer_manipulation(
                 ZydisDecodedInstruction const &instruction);
+            Address get_unanalized_inner_jump_dst() const;
 
             static bool is_conditional_jump(ZydisMnemonic mnemonic);
 
@@ -120,6 +121,9 @@ namespace rstc {
 #endif
 
     private:
+        ZydisDecodedInstruction decode_instruction(Address address,
+                                                   Address end);
+
         void fill_cfgraph(CFGraph &cfgraph);
         void post_fill_cfgraph(CFGraph &cfgraph);
         void analyze_cfgraph(Address entry_point);
@@ -129,8 +133,9 @@ namespace rstc {
         void promote_jumps_to_inner();
         void post_analyze_cfgraphs();
         void wait_for_all_analyzing_threads();
+        bool unknown_jumps_exist() const;
 
-        Address pop_unanalyzed_cfgraph();
+        Address pop_unprocessed_cfgraph();
 
         ZydisDecoder decoder_;
 #ifndef NDEBUG
@@ -147,7 +152,7 @@ namespace rstc {
         std::vector<std::thread> analyzing_threads_;
         std::set<Address> created_cfgraphs_;
         std::map<Address, std::unique_ptr<CFGraph>> cfgraphs_;
-        std::deque<Address> unanalyzed_cfgraphs_;
+        std::deque<Address> unprocessed_cfgraphs_;
     };
 
 }
