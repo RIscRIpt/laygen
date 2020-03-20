@@ -469,8 +469,9 @@ void Restruc::post_analyze_cfgraphs()
     while (!unanalyzed_cfgraphs_.empty()) {
         if (analyzing_threads_count_ >= max_analyzing_threads_) {
             // Wait for all analyzing threads
-            cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_),
-                              [this] { return analyzing_threads_count_ == 0; });
+            cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_), [this] {
+                return analyzing_threads_count_ < max_analyzing_threads_;
+            });
         }
         auto &cfgraph = cfgraphs_[pop_unanalyzed_cfgraph()];
         post_analyze_cfgraph(*cfgraph);
