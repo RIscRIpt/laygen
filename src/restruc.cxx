@@ -66,6 +66,10 @@ Restruc::CFGraph::AnalysisResult Restruc::CFGraph::analyze(Address address)
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_JMP
              || is_conditional_jump(instruction.mnemonic)) {
         bool unconditional = instruction.mnemonic == ZYDIS_MNEMONIC_JMP;
+        // TODO: JMP can be:
+        // * jmp offset
+        // * jmp [address]
+        // * jmp reg
         auto offset = instruction.operands[0].imm.value.s;
         Address dst = next_address + offset;
         auto type = get_jump_type(dst, address, next_address);
