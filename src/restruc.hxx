@@ -84,7 +84,7 @@ namespace rstc {
 
             bool is_complete() const;
             bool is_jump_table_entry() const;
-            AnalysisResult analyze(Address address);
+            AnalysisResult analyze(PE &pe, Address address);
             SPManipulationType analyze_stack_pointer_manipulation(
                 ZydisDecodedInstruction const &instruction);
             Address get_unanalized_inner_jump_dst() const;
@@ -132,7 +132,7 @@ namespace rstc {
         void promote_jumps_to_outer();
         void promote_jumps_to_inner();
         void post_analyze_cfgraphs();
-        void wait_for_all_analyzing_threads();
+        void wait_for_all_analyzing_threads_end();
         bool unknown_jumps_exist() const;
 
         Address pop_unprocessed_cfgraph();

@@ -11,10 +11,11 @@ int wmain(int argc, wchar_t *argv[])
 
     try {
         rstc::Restruc restruc(argv[1]);
-        restruc.set_max_analyzing_threads(128);
 #ifdef NDEBUG
+        restruc.set_max_analyzing_threads(128);
         restruc.analyze();
 #else
+        restruc.set_max_analyzing_threads(1);
         restruc.debug(std::cout);
 #endif
     }
