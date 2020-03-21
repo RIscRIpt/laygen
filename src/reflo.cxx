@@ -1,4 +1,4 @@
-#include "restruc.hxx"
+#include "reflo.hxx"
 #include "scope_guard.hxx"
 #include "zyan_error.hxx"
 
@@ -22,23 +22,23 @@ using namespace rstc;
         }                              \
     } while (0)
 
-Restruc::CFGraph::CFGraph()
+Reflo::CFGraph::CFGraph()
     : entry_point(nullptr)
 {
 }
 
-Restruc::CFGraph::CFGraph(Address entry_point)
+Reflo::CFGraph::CFGraph(Address entry_point)
     : entry_point(entry_point)
 {
 }
 
-bool Restruc::CFGraph::is_complete() const
+bool Reflo::CFGraph::is_complete() const
 {
     return !instructions.empty() && unknown_jumps.empty() && has_ret
            || is_jump_table_entry();
 }
 
-bool Restruc::CFGraph::is_jump_table_entry() const
+bool Reflo::CFGraph::is_jump_table_entry() const
 {
     if (instructions.size() != 1) {
         return false;
@@ -47,7 +47,7 @@ bool Restruc::CFGraph::is_jump_table_entry() const
     return i.mnemonic == ZYDIS_MNEMONIC_JMP;
 }
 
-Restruc::CFGraph::AnalysisResult Restruc::CFGraph::analyze(PE &pe,
+Reflo::CFGraph::AnalysisResult Reflo::CFGraph::analyze(PE &pe,
                                                            Address address)
 {
     auto const &instruction = instructions[address];
@@ -107,7 +107,7 @@ Restruc::CFGraph::AnalysisResult Restruc::CFGraph::analyze(PE &pe,
     return { Next, next_address };
 }
 
-bool Restruc::CFGraph::is_conditional_jump(ZydisMnemonic mnemonic)
+bool Reflo::CFGraph::is_conditional_jump(ZydisMnemonic mnemonic)
 {
     switch (mnemonic) {
     case ZYDIS_MNEMONIC_JB:
@@ -142,8 +142,8 @@ bool Restruc::CFGraph::is_conditional_jump(ZydisMnemonic mnemonic)
     return false;
 }
 
-Restruc::CFGraph::SPManipulationType
-Restruc::CFGraph::analyze_stack_pointer_manipulation(
+Reflo::CFGraph::SPManipulationType
+Reflo::CFGraph::analyze_stack_pointer_manipulation(
     ZydisDecodedInstruction const &instruction)
 {
     if (instruction.operand_count == 2) {
@@ -184,7 +184,7 @@ Restruc::CFGraph::analyze_stack_pointer_manipulation(
     return SPUnmodified;
 }
 
-Address Restruc::CFGraph::get_unanalized_inner_jump_dst() const
+Address Reflo::CFGraph::get_unanalized_inner_jump_dst() const
 {
     for (auto it = inner_jumps.begin(), end = inner_jumps.end(); it != end;
          it = inner_jumps.upper_bound(it->first)) {
@@ -195,14 +195,14 @@ Address Restruc::CFGraph::get_unanalized_inner_jump_dst() const
     return nullptr;
 }
 
-void Restruc::CFGraph::add_instruction(
+void Reflo::CFGraph::add_instruction(
     Address address,
     ZydisDecodedInstruction const &instruction)
 {
     instructions.emplace(address, instruction);
 }
 
-void Restruc::CFGraph::add_jump(Jump::Type type, Address dst, Address src)
+void Reflo::CFGraph::add_jump(Jump::Type type, Address dst, Address src)
 {
     switch (type) {
     case Jump::Inner:
@@ -217,12 +217,12 @@ void Restruc::CFGraph::add_jump(Jump::Type type, Address dst, Address src)
     }
 }
 
-void Restruc::CFGraph::add_call(Address dst, Address src, Address ret)
+void Reflo::CFGraph::add_call(Address dst, Address src, Address ret)
 {
     calls.emplace(src, Call(dst, src, ret));
 }
 
-bool Restruc::CFGraph::promote_unknown_jump(Address dst, Jump::Type new_type)
+bool Reflo::CFGraph::promote_unknown_jump(Address dst, Jump::Type new_type)
 {
     bool promoted = false;
     while (true) {
@@ -237,13 +237,13 @@ bool Restruc::CFGraph::promote_unknown_jump(Address dst, Jump::Type new_type)
     return promoted;
 }
 
-void Restruc::CFGraph::visit(Address address)
+void Reflo::CFGraph::visit(Address address)
 {
     promote_unknown_jump(address, Jump::Inner);
 }
 
-Restruc::Jump::Type
-Restruc::CFGraph::get_jump_type(Address dst, Address src, Address next) const
+Reflo::Jump::Type
+Reflo::CFGraph::get_jump_type(Address dst, Address src, Address next) const
 {
     // If jumping with offset 0, i.e. no jump
     if (dst == next) {
@@ -279,17 +279,17 @@ Restruc::CFGraph::get_jump_type(Address dst, Address src, Address next) const
     return Jump::Unknown;
 }
 
-bool Restruc::CFGraph::stack_depth_is_ambiguous() const
+bool Reflo::CFGraph::stack_depth_is_ambiguous() const
 {
     return stack_depth == -1;
 }
 
-bool Restruc::CFGraph::is_inside(Address address) const
+bool Reflo::CFGraph::is_inside(Address address) const
 {
     return instructions.contains(address) || inner_jumps.contains(address);
 }
 
-Restruc::Restruc(std::filesystem::path const &pe_path)
+Reflo::Reflo(std::filesystem::path const &pe_path)
     : pe_(pe_path)
     , max_analyzing_threads_(std::thread::hardware_concurrency())
 {
@@ -301,7 +301,7 @@ Restruc::Restruc(std::filesystem::path const &pe_path)
 #endif
 }
 
-ZydisDecodedInstruction Restruc::decode_instruction(Address address,
+ZydisDecodedInstruction Reflo::decode_instruction(Address address,
                                                     Address end)
 {
     ZydisDecodedInstruction instruction;
@@ -312,7 +312,7 @@ ZydisDecodedInstruction Restruc::decode_instruction(Address address,
     return instruction;
 }
 
-void Restruc::fill_cfgraph(CFGraph &cfgraph)
+void Reflo::fill_cfgraph(CFGraph &cfgraph)
 {
     Address address;
     Address next_address;
@@ -340,7 +340,7 @@ void Restruc::fill_cfgraph(CFGraph &cfgraph)
     }
 }
 
-void Restruc::post_fill_cfgraph(CFGraph &cfgraph)
+void Reflo::post_fill_cfgraph(CFGraph &cfgraph)
 {
     while (auto address = cfgraph.get_unanalized_inner_jump_dst()) {
         auto next_address = address;
@@ -363,7 +363,7 @@ void Restruc::post_fill_cfgraph(CFGraph &cfgraph)
     }
 }
 
-void Restruc::analyze_cfgraph(Address entry_point)
+void Reflo::analyze_cfgraph(Address entry_point)
 {
     cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_), [this] {
         return analyzing_threads_count_ < max_analyzing_threads_;
@@ -411,7 +411,7 @@ void Restruc::analyze_cfgraph(Address entry_point)
     });
 }
 
-void Restruc::post_analyze_cfgraph(CFGraph &cfgraph)
+void Reflo::post_analyze_cfgraph(CFGraph &cfgraph)
 {
     ++analyzing_threads_count_;
     analyzing_threads_.emplace_back([&] {
@@ -432,7 +432,7 @@ void Restruc::post_analyze_cfgraph(CFGraph &cfgraph)
     });
 }
 
-Address Restruc::pop_unprocessed_cfgraph()
+Address Reflo::pop_unprocessed_cfgraph()
 {
     std::lock_guard<std::mutex> popping_cfgraph_guard(cfgraphs_mutex_);
     auto address = unprocessed_cfgraphs_.front();
@@ -440,7 +440,7 @@ Address Restruc::pop_unprocessed_cfgraph()
     return address;
 }
 
-void Restruc::find_and_analyze_cfgraphs()
+void Reflo::find_and_analyze_cfgraphs()
 {
     analyze_cfgraph(pe_.get_entry_point());
     while (true) {
@@ -473,7 +473,7 @@ void Restruc::find_and_analyze_cfgraphs()
     wait_for_all_analyzing_threads_end();
 }
 
-void Restruc::promote_jumps_to_outer()
+void Reflo::promote_jumps_to_outer()
 {
     // Promote all unknown jumps to outer jumps
     // Because we have all cfgraphs, and we can assume that all
@@ -495,7 +495,7 @@ void Restruc::promote_jumps_to_outer()
     }
 }
 
-void Restruc::promote_jumps_to_inner()
+void Reflo::promote_jumps_to_inner()
 {
     // Promote all unknown jumps to inner jumps,
     // as some unknown jumps were promoted to outer jumps,
@@ -515,7 +515,7 @@ void Restruc::promote_jumps_to_inner()
     }
 }
 
-void Restruc::post_analyze_cfgraphs()
+void Reflo::post_analyze_cfgraphs()
 {
     while (!unprocessed_cfgraphs_.empty()) {
         if (analyzing_threads_count_ >= max_analyzing_threads_) {
@@ -530,7 +530,7 @@ void Restruc::post_analyze_cfgraphs()
     wait_for_all_analyzing_threads_end();
 }
 
-void Restruc::analyze()
+void Reflo::analyze()
 {
     find_and_analyze_cfgraphs();
     while (unknown_jumps_exist()) {
@@ -540,7 +540,7 @@ void Restruc::analyze()
     }
 }
 
-void Restruc::wait_for_all_analyzing_threads_end()
+void Reflo::wait_for_all_analyzing_threads_end()
 {
     std::for_each(analyzing_threads_.begin(),
                   analyzing_threads_.end(),
@@ -548,7 +548,7 @@ void Restruc::wait_for_all_analyzing_threads_end()
     analyzing_threads_.clear();
 }
 
-bool Restruc::unknown_jumps_exist() const
+bool Reflo::unknown_jumps_exist() const
 {
     return std::any_of(cfgraphs_.cbegin(),
                        cfgraphs_.cend(),
@@ -557,14 +557,14 @@ bool Restruc::unknown_jumps_exist() const
                        });
 }
 
-void Restruc::set_max_analyzing_threads(size_t amount)
+void Reflo::set_max_analyzing_threads(size_t amount)
 {
     max_analyzing_threads_ = amount;
 }
 
 #ifndef NDEBUG
 
-void Restruc::debug(std::ostream &os)
+void Reflo::debug(std::ostream &os)
 {
     analyze();
     for (auto const &f : cfgraphs_) {
@@ -572,7 +572,7 @@ void Restruc::debug(std::ostream &os)
     }
 }
 
-void Restruc::dump_instruction(std::ostream &os,
+void Reflo::dump_instruction(std::ostream &os,
                                DWORD va,
                                ZydisDecodedInstruction const &instruction)
 {
@@ -586,7 +586,7 @@ void Restruc::dump_instruction(std::ostream &os,
        << buffer << '\n';
 }
 
-void Restruc::dump_cfgraph(std::ostream &os,
+void Reflo::dump_cfgraph(std::ostream &os,
                            ZydisFormatter const &formatter,
                            CFGraph const &cfgraph)
 {

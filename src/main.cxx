@@ -1,4 +1,4 @@
-#include "restruc.hxx"
+#include "reflo.hxx"
 
 #include <iostream>
 
@@ -10,13 +10,13 @@ int wmain(int argc, wchar_t *argv[])
     }
 
     try {
-        rstc::Restruc restruc(argv[1]);
+        rstc::Reflo reflo(argv[1]);
 #ifdef NDEBUG
-        restruc.set_max_analyzing_threads(128);
-        restruc.analyze();
+        reflo.set_max_analyzing_threads(128);
+        reflo.analyze();
 #else
-        restruc.set_max_analyzing_threads(1);
-        restruc.debug(std::cout);
+        reflo.set_max_analyzing_threads(1);
+        reflo.debug(std::cout);
 #endif
     }
     catch (std::exception const &e) {

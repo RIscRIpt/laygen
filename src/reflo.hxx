@@ -16,7 +16,7 @@ namespace rstc {
 
     using Address = BYTE *;
 
-    class Restruc {
+    class Reflo {
     public:
         using Instructions = std::map<Address, ZydisDecodedInstruction>;
 
@@ -105,7 +105,7 @@ namespace rstc {
         };
 
     public:
-        Restruc(std::filesystem::path const &pe_path);
+        Reflo(std::filesystem::path const &pe_path);
 
         void analyze();
         void set_max_analyzing_threads(size_t amount);
