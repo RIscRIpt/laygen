@@ -36,6 +36,8 @@ namespace rstc {
             Address const dst;
             Address const src;
         };
+
+        // Destination -> Jump
         using Jumps = std::multimap<Address, Jump>;
 
         struct Call : public Jump {
@@ -46,6 +48,8 @@ namespace rstc {
             }
             Address const ret;
         };
+
+        // Destination -> Call
         using Calls = std::multimap<Address, Call>;
 
     private:
