@@ -136,7 +136,7 @@ namespace rstc {
         void promote_jumps_to_outer();
         void promote_jumps_to_inner();
         void post_analyze_cfgraphs();
-        void wait_for_all_analyzing_threads_end();
+        void wait_for_all_analyzing_threads();
         bool unknown_jumps_exist() const;
 
         Address pop_unprocessed_cfgraph();

@@ -467,7 +467,7 @@ void Reflo::find_and_analyze_cfgraphs()
             analyze_cfgraph(it->second.dst);
         }
     }
-    wait_for_all_analyzing_threads_end();
+    wait_for_all_analyzing_threads();
 }
 
 void Reflo::promote_jumps_to_outer()
@@ -524,7 +524,7 @@ void Reflo::post_analyze_cfgraphs()
         auto &cfgraph = cfgraphs_[pop_unprocessed_cfgraph()];
         post_analyze_cfgraph(*cfgraph);
     }
-    wait_for_all_analyzing_threads_end();
+    wait_for_all_analyzing_threads();
 }
 
 void Reflo::analyze()
@@ -540,7 +540,7 @@ void Reflo::analyze()
     }
 }
 
-void Reflo::wait_for_all_analyzing_threads_end()
+void Reflo::wait_for_all_analyzing_threads()
 {
     std::for_each(analyzing_threads_.begin(),
                   analyzing_threads_.end(),
