@@ -47,8 +47,7 @@ bool Reflo::CFGraph::is_jump_table_entry() const
     return i.mnemonic == ZYDIS_MNEMONIC_JMP;
 }
 
-Reflo::CFGraph::AnalysisResult Reflo::CFGraph::analyze(PE &pe,
-                                                           Address address)
+Reflo::CFGraph::AnalysisResult Reflo::CFGraph::analyze(PE &pe, Address address)
 {
     auto const &instruction = instructions[address];
     Address next_address = address + instruction.length;
@@ -195,9 +194,8 @@ Address Reflo::CFGraph::get_unanalized_inner_jump_dst() const
     return nullptr;
 }
 
-void Reflo::CFGraph::add_instruction(
-    Address address,
-    ZydisDecodedInstruction const &instruction)
+void Reflo::CFGraph::add_instruction(Address address,
+                                     ZydisDecodedInstruction const &instruction)
 {
     instructions.emplace(address, instruction);
 }
@@ -301,8 +299,7 @@ Reflo::Reflo(std::filesystem::path const &pe_path)
 #endif
 }
 
-ZydisDecodedInstruction Reflo::decode_instruction(Address address,
-                                                    Address end)
+ZydisDecodedInstruction Reflo::decode_instruction(Address address, Address end)
 {
     ZydisDecodedInstruction instruction;
     ZYAN_THROW(ZydisDecoderDecodeBuffer(&decoder_,
@@ -520,7 +517,7 @@ void Reflo::post_analyze_cfgraphs()
     while (!unprocessed_cfgraphs_.empty()) {
         if (analyzing_threads_count_ >= max_analyzing_threads_) {
             // Wait for all analyzing threads
-            cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_), [this] {
+            cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_), [this]() {
                 return analyzing_threads_count_ < max_analyzing_threads_;
             });
         }
@@ -535,6 +532,9 @@ void Reflo::analyze()
     find_and_analyze_cfgraphs();
     while (unknown_jumps_exist()) {
         promote_jumps_to_outer();
+        // Tehnically, we can't promote unknown jumps to inner jumps, as
+        // we still haven't explored the program as a whole, and some cfgraphs
+        // (functions) might be unlisted yet.
         promote_jumps_to_inner();
         post_analyze_cfgraphs();
     }
@@ -573,8 +573,8 @@ void Reflo::debug(std::ostream &os)
 }
 
 void Reflo::dump_instruction(std::ostream &os,
-                               DWORD va,
-                               ZydisDecodedInstruction const &instruction)
+                             DWORD va,
+                             ZydisDecodedInstruction const &instruction)
 {
     char buffer[256];
     ZYAN_THROW(ZydisFormatterFormatInstruction(&formatter_,
@@ -587,8 +587,8 @@ void Reflo::dump_instruction(std::ostream &os,
 }
 
 void Reflo::dump_cfgraph(std::ostream &os,
-                           ZydisFormatter const &formatter,
-                           CFGraph const &cfgraph)
+                         ZydisFormatter const &formatter,
+                         CFGraph const &cfgraph)
 {
     char buffer[256];
     os << std::hex << std::setfill('0');
