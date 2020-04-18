@@ -14,13 +14,10 @@
 
 namespace rstc {
 
-    using Register = uintptr_t;
     using Address = BYTE *;
 
     class Reflo {
     public:
-        using Instructions = std::map<Address, ZydisDecodedInstruction>;
-
         struct Jump {
             enum Type {
                 Unknown,
@@ -53,16 +50,28 @@ namespace rstc {
         // Destination -> Call
         using Calls = std::multimap<Address, Call>;
 
+        struct Register {
+            uintptr_t value = 0;
+            uintptr_t mask = 0;
+        };
+
         struct Context {
             Register rax, rbx, rcx, rdx, rsp, rbp, rsi, rdi;
             Register r8, r9, r10, r11, r12, r13, r14, r15;
             Register rflags;
         };
 
+        struct ContextedInstruction {
+            ZydisDecodedInstruction instruction;
+            Context context;
+        };
+
+        using Disassembly = std::map<Address, ContextedInstruction>;
+
     private:
         struct CFGraph {
             Address const entry_point;
-            Instructions instructions;
+            Disassembly disassembly;
             Jumps inner_jumps;
             Jumps outer_jumps;
             Jumps unknown_jumps;
@@ -90,8 +99,7 @@ namespace rstc {
                 Address const next_address;
             };
 
-            CFGraph();
-            CFGraph(Address entry_point);
+            CFGraph(Address entry_point = nullptr);
 
             bool is_complete() const;
             bool is_jump_table_entry() const;

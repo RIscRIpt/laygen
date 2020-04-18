@@ -22,11 +22,6 @@ using namespace rstc;
         }                              \
     } while (0)
 
-Reflo::CFGraph::CFGraph()
-    : entry_point(nullptr)
-{
-}
-
 Reflo::CFGraph::CFGraph(Address entry_point)
     : entry_point(entry_point)
 {
@@ -34,22 +29,22 @@ Reflo::CFGraph::CFGraph(Address entry_point)
 
 bool Reflo::CFGraph::is_complete() const
 {
-    return !instructions.empty() && unknown_jumps.empty() && has_ret
+    return !disassembly.empty() && unknown_jumps.empty() && has_ret
            || is_jump_table_entry();
 }
 
 bool Reflo::CFGraph::is_jump_table_entry() const
 {
-    if (instructions.size() != 1) {
+    if (disassembly.size() != 1) {
         return false;
     }
-    auto const &i = instructions.begin()->second;
+    auto const &i = disassembly.begin()->second.instruction;
     return i.mnemonic == ZYDIS_MNEMONIC_JMP;
 }
 
 Reflo::CFGraph::AnalysisResult Reflo::CFGraph::analyze(PE &pe, Address address)
 {
-    auto const &instruction = instructions[address];
+    auto const &instruction = disassembly[address].instruction;
     Address next_address = address + instruction.length;
     visit(address);
     if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL) {
@@ -187,7 +182,7 @@ Address Reflo::CFGraph::get_unanalized_inner_jump_dst() const
 {
     for (auto it = inner_jumps.begin(), end = inner_jumps.end(); it != end;
          it = inner_jumps.upper_bound(it->first)) {
-        if (!instructions.contains(it->first)) {
+        if (!disassembly.contains(it->first)) {
             return it->first;
         }
     }
@@ -197,7 +192,7 @@ Address Reflo::CFGraph::get_unanalized_inner_jump_dst() const
 void Reflo::CFGraph::add_instruction(Address address,
                                      ZydisDecodedInstruction const &instruction)
 {
-    instructions.emplace(address, instruction);
+    disassembly.emplace(address, ContextedInstruction{ instruction, {} });
 }
 
 void Reflo::CFGraph::add_jump(Jump::Type type, Address dst, Address src)
@@ -248,12 +243,12 @@ Reflo::CFGraph::get_jump_type(Address dst, Address src, Address next) const
         return Jump::Inner;
     }
     // If jump is first cfgraph instruction
-    if (instructions.size() == 1) {
+    if (disassembly.size() == 1) {
         // Assume JMP table
         return Jump::Outer;
     }
     // If destination is one of the previous instructions
-    if (instructions.contains(dst)) {
+    if (disassembly.contains(dst)) {
         return Jump::Inner;
     }
     // If jumping above entry-point
@@ -284,7 +279,7 @@ bool Reflo::CFGraph::stack_depth_is_ambiguous() const
 
 bool Reflo::CFGraph::is_inside(Address address) const
 {
-    return instructions.contains(address) || inner_jumps.contains(address);
+    return disassembly.contains(address) || inner_jumps.contains(address);
 }
 
 Reflo::Reflo(std::filesystem::path const &pe_path)
@@ -313,11 +308,11 @@ void Reflo::fill_cfgraph(CFGraph &cfgraph)
 {
     Address address;
     Address next_address;
-    if (cfgraph.instructions.empty()) {
+    if (cfgraph.disassembly.empty()) {
         next_address = cfgraph.entry_point;
     }
     else {
-        next_address = cfgraph.instructions.rbegin()->first;
+        next_address = cfgraph.disassembly.rbegin()->first;
     }
     Address end = pe_.get_end(next_address);
     while (true) {
@@ -594,9 +589,9 @@ void Reflo::dump_cfgraph(std::ostream &os,
     os << std::hex << std::setfill('0');
     os << std::setw(8) << pe_.raw_to_virtual_address(cfgraph.entry_point)
        << ":\n";
-    for (auto const &[address, instruction] : cfgraph.instructions) {
+    for (auto const &[address, contexted_instruction] : cfgraph.disassembly) {
         auto va = pe_.raw_to_virtual_address(address);
-        dump_instruction(os, va, instruction);
+        dump_instruction(os, va, contexted_instruction.instruction);
     }
     os << '\n';
 }
