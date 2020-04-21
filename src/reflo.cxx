@@ -22,43 +22,43 @@ using namespace rstc;
         }                              \
     } while (0)
 
-Reflo::CFGraph::CFGraph(Address entry_point, ContextPtr context)
+Reflo::CFGraph::CFGraph(Address entry_point)
     : entry_point(entry_point)
-    , initial_context(std::move(context))
 {
 }
 
-void Reflo::CFGraph::emulate(ZydisDecodedInstruction const &instruction,
-                             Context &context) const
+Reflo::CFGraph::AnalysisResult
+Reflo::CFGraph::analyze(PE &pe, Address address, Instruction instr)
 {
-    // TODO: analyze context
-}
-
-Reflo::ContextPtr Reflo::CFGraph::get_context(Address address) const
-{
-    if (disassembly.empty()) {
-        return std::move(initial_context);
-    }
-    auto it = disassembly.upper_bound(address);
-    auto const &ctx_instr = it->second;
-    auto context = std::make_unique<Context>(*ctx_instr.context);
-    emulate(*ctx_instr.instruction, *context);
-    return std::move(context);
-}
-
-Reflo::CFGraph::AnalysisResult Reflo::CFGraph::analyze(Address address,
-                                                       Instruction instr)
-{
-    auto result = disassembly.emplace(
-        address,
-        ContextedInstruction{ std::move(instr), get_context(address) });
-    auto const &instruction = *result.first->second.instruction;
+    auto result = disassembly.emplace(address, std::move(instr));
+    auto const &instruction = *result.first->second;
     Address next_address = address + instruction.length;
     visit(address);
     if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL) {
         // Assume calls always return (i.e. they are not no-return)
-        Address dst = next_address + instruction.operands[0].imm.value.s;
-        add_call(dst, address, next_address);
+        auto const &op = instruction.operands[0];
+        switch (op.type) {
+        case ZYDIS_OPERAND_TYPE_IMMEDIATE:
+            add_call(next_address + instruction.operands[0].imm.value.s,
+                     address,
+                     next_address);
+            break;
+            /*
+        case ZYDIS_OPERAND_TYPE_MEMORY:
+            if (op.mem.type == ZYDIS_MEMOP_TYPE_MEM
+                && op.mem.segment == ZYDIS_REGISTER_DS
+                && op.mem.base == ZYDIS_REGISTER_RIP
+                && op.mem.index == ZYDIS_REGISTER_NONE && op.mem.scale == 0
+                && op.mem.disp.has_displacement) {
+                Address dst_addr = next_address + op.mem.disp.value;
+                Address dst = *reinterpret_cast<Address *>(dst_addr); // dst is
+        invalid (virtual / without relocation) if (dst != nullptr) {
+                    add_call(dst, address, next_address);
+                }
+            }
+            break;
+            */
+        }
     }
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
         has_ret = true;
@@ -328,7 +328,8 @@ void Reflo::fill_cfgraph(CFGraph &cfgraph)
                          pe_.raw_to_virtual_address(address),
                          instruction);
 #endif
-        auto analysis_status = cfgraph.analyze(address, std::move(instruction));
+        auto analysis_status =
+            cfgraph.analyze(pe_, address, std::move(instruction));
         next_address = analysis_status.next_address;
     }
 }
@@ -350,7 +351,7 @@ void Reflo::post_fill_cfgraph(CFGraph &cfgraph)
                              instruction);
 #endif
             auto analysis_status =
-                cfgraph.analyze(address, std::move(instruction));
+                cfgraph.analyze(pe_, address, std::move(instruction));
             next_address = analysis_status.next_address;
         }
     }
@@ -364,7 +365,7 @@ void Reflo::wait_before_analysis_run()
     ++analyzing_threads_count_;
 }
 
-void Reflo::run_cfgraph_analysis(Address entry_point, ContextPtr context)
+void Reflo::run_cfgraph_analysis(Address entry_point)
 {
     // Prevent recursive analysis
     if (created_cfgraphs_.contains(entry_point)) {
@@ -372,39 +373,36 @@ void Reflo::run_cfgraph_analysis(Address entry_point, ContextPtr context)
     }
     created_cfgraphs_.emplace(entry_point);
     wait_before_analysis_run();
-    analyzing_threads_.emplace_back(
-        [this, entry_point, context = std::move(context)]() mutable {
-            try {
-                ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
-                    --analyzing_threads_count_;
-                    cfgraphs_cv_.notify_all();
-                });
+    analyzing_threads_.emplace_back([this, entry_point]() mutable {
+        try {
+            ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
+                --analyzing_threads_count_;
+                cfgraphs_cv_.notify_all();
+            });
 
 #ifdef DEBUG_ANALYSIS
-                std::clog << "Analyzing: " << std::hex << std::setfill('0')
-                          << std::setw(8)
-                          << pe_.raw_to_virtual_address(entry_point) << '\n';
+            std::clog << "Analyzing: " << std::hex << std::setfill('0')
+                      << std::setw(8) << pe_.raw_to_virtual_address(entry_point)
+                      << '\n';
 #endif
 
-                auto cfgraph =
-                    std::make_unique<CFGraph>(entry_point, std::move(context));
-                fill_cfgraph(*cfgraph);
+            auto cfgraph = std::make_unique<CFGraph>(entry_point);
+            fill_cfgraph(*cfgraph);
 
-                {
-                    std::lock_guard<std::mutex> adding_cfgraph_guard(
-                        cfgraphs_mutex_);
-                    cfgraphs_.emplace(entry_point, std::move(cfgraph));
-                    unprocessed_cfgraphs_.push_back(entry_point);
-                }
+            {
+                std::lock_guard<std::mutex> adding_cfgraph_guard(
+                    cfgraphs_mutex_);
+                cfgraphs_.emplace(entry_point, std::move(cfgraph));
+                unprocessed_cfgraphs_.push_back(entry_point);
             }
-            catch (zyan_error const &e) {
-                std::cerr << std::hex << std::setfill('0')
-                          << "Failed to analyze cfgraph " << std::setw(8)
-                          << pe_.raw_to_virtual_address(entry_point)
-                          << ", error:\n"
-                          << e.what() << '\n';
-            }
-        });
+        }
+        catch (zyan_error const &e) {
+            std::cerr << std::hex << std::setfill('0')
+                      << "Failed to analyze cfgraph " << std::setw(8)
+                      << pe_.raw_to_virtual_address(entry_point) << ", error:\n"
+                      << e.what() << '\n';
+        }
+    });
 }
 
 void Reflo::run_cfgraph_post_analysis(CFGraph &cfgraph)
@@ -438,8 +436,7 @@ Address Reflo::pop_unprocessed_cfgraph()
 
 void Reflo::find_and_analyze_cfgraphs()
 {
-    run_cfgraph_analysis(pe_.get_entry_point(),
-                         std::move(make_initial_context()));
+    run_cfgraph_analysis(pe_.get_entry_point());
     while (true) {
         if (unprocessed_cfgraphs_.empty()) {
             // Wait for all analyzing threads
@@ -457,9 +454,7 @@ void Reflo::find_and_analyze_cfgraphs()
              it != end;
              it = cfgraph->calls.upper_bound(it->first)) {
             auto const &jump = it->second;
-            run_cfgraph_analysis(jump.dst,
-                                 std::move(make_cfgraph_initial_context(
-                                     *cfgraph->disassembly[jump.src].context)));
+            run_cfgraph_analysis(jump.dst);
         }
 
         // Iterate over unique outer jumps
@@ -468,9 +463,7 @@ void Reflo::find_and_analyze_cfgraphs()
              it != end;
              it = cfgraph->outer_jumps.upper_bound(it->first)) {
             auto const &jump = it->second;
-            run_cfgraph_analysis(jump.dst,
-                                 std::move(make_cfgraph_initial_context(
-                                     *cfgraph->disassembly[jump.src].context)));
+            run_cfgraph_analysis(jump.dst);
         }
     }
     wait_for_analysis();
@@ -562,37 +555,6 @@ void Reflo::set_max_analyzing_threads(size_t amount)
     max_analyzing_threads_ = amount;
 }
 
-std::unique_ptr<Reflo::Context> Reflo::make_initial_context()
-{
-    auto c = std::make_unique<Context>();
-    c->rax = pe_.raw_to_virtual_address(pe_.get_entry_point());
-    c->rbx = 0;
-    c->rcx.unset(); // &PEB
-    c->rdx = c->rax;
-    c->rbp = 0;
-    c->rsp = 0;
-    c->rsi = 0;
-    c->rdi = 0;
-    c->r8 = c->rcx;
-    c->r9 = c->rax;
-    c->r10 = 0;
-    c->r11 = 0;
-    c->r12 = 0;
-    c->r13 = 0;
-    c->r14 = 0;
-    c->r15 = 0;
-    c->rflags = 0x244;
-    return std::move(c);
-}
-
-std::unique_ptr<Reflo::Context>
-Reflo::make_cfgraph_initial_context(Context const &src_context)
-{
-    auto c = std::make_unique<Context>(src_context);
-    c->rsp -= 8; // size of address
-    return std::move(c);
-}
-
 #ifndef NDEBUG
 
 void Reflo::debug(std::ostream &os)
@@ -625,9 +587,9 @@ void Reflo::dump_cfgraph(std::ostream &os,
     os << std::hex << std::setfill('0');
     os << std::setw(8) << pe_.raw_to_virtual_address(cfgraph.entry_point)
        << ":\n";
-    for (auto const &[address, contexted_instruction] : cfgraph.disassembly) {
+    for (auto const &[address, instruction] : cfgraph.disassembly) {
         auto va = pe_.raw_to_virtual_address(address);
-        dump_instruction(os, va, *contexted_instruction.instruction);
+        dump_instruction(os, va, *instruction);
     }
     os << '\n';
 }

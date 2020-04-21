@@ -41,6 +41,7 @@ namespace rstc {
 
         BYTE *get_entry_point();
 
+        BYTE *get_begin(BYTE *pointer);
         BYTE *get_end(BYTE *pointer);
 
     private:

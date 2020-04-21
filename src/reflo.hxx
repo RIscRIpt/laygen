@@ -52,59 +52,7 @@ namespace rstc {
         // Destination -> Call
         using Calls = std::multimap<Address, Call>;
 
-        struct Register {
-            uintptr_t value = 0;
-            uintptr_t mask = 0;
-
-            Register &operator=(Register const &other)
-            {
-                value = other.value;
-                mask = other.mask;
-                return *this;
-            }
-
-            Register &operator=(uintptr_t new_value)
-            {
-                value = new_value;
-                mask = ~0;
-                return *this;
-            }
-
-            void unset()
-            {
-                value = 0;
-                mask = 0;
-            }
-
-            Register &operator+=(uintptr_t value)
-            {
-                value += value;
-                value &= mask;
-                return *this;
-            }
-
-            Register &operator-=(uintptr_t value)
-            {
-                value -= value;
-                value &= mask;
-                return *this;
-            }
-        };
-
-        struct Context {
-            Register rax, rbx, rcx, rdx, rsp, rbp, rsi, rdi;
-            Register r8, r9, r10, r11, r12, r13, r14, r15;
-            Register rflags;
-        };
-
-        using ContextPtr = std::unique_ptr<Context>;
-
-        struct ContextedInstruction {
-            Instruction instruction;
-            ContextPtr context;
-        };
-
-        using Disassembly = std::map<Address, ContextedInstruction>;
+        using Disassembly = std::map<Address, Instruction>;
 
     private:
         class CFGraph {
@@ -128,11 +76,9 @@ namespace rstc {
                 Address const next_address;
             };
 
-            CFGraph(Address entry_point = nullptr,
-                    ContextPtr context = nullptr);
+            CFGraph(Address entry_point = nullptr);
 
-            ContextPtr get_context(Address address) const;
-            AnalysisResult analyze(Address address, Instruction instr);
+            AnalysisResult analyze(PE &pe, Address address, Instruction instr);
             SPManipulationType analyze_stack_pointer_manipulation(
                 ZydisDecodedInstruction const &instruction);
             Address get_unanalized_inner_jump_dst() const;
@@ -157,15 +103,10 @@ namespace rstc {
             Jump::Type
             get_jump_type(Address dst, Address src, Address next) const;
 
-            void emulate(ZydisDecodedInstruction const &instruction,
-                         Context &context) const;
             void visit(Address address);
             bool promote_unknown_jump(Address dst, Jump::Type new_type);
 
             static bool is_conditional_jump(ZydisMnemonic mnemonic);
-
-            // Will be nullptr after first instruction is added to disassembly
-            ContextPtr mutable initial_context;
         };
 
     public:
@@ -190,7 +131,7 @@ namespace rstc {
         void fill_cfgraph(CFGraph &cfgraph);
         void post_fill_cfgraph(CFGraph &cfgraph);
         void wait_before_analysis_run();
-        void run_cfgraph_analysis(Address entry_point, ContextPtr context);
+        void run_cfgraph_analysis(Address entry_point);
         void run_cfgraph_post_analysis(CFGraph &cfgraph);
         void find_and_analyze_cfgraphs();
         void promote_jumps_to_outer();
@@ -200,9 +141,6 @@ namespace rstc {
         bool unknown_jumps_exist() const;
 
         Address pop_unprocessed_cfgraph();
-
-        ContextPtr make_initial_context();
-        ContextPtr make_cfgraph_initial_context(Context const &src_context);
 
         ZydisDecoder decoder_;
 #ifndef NDEBUG

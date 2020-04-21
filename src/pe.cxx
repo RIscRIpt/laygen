@@ -120,6 +120,12 @@ BYTE *PE::get_entry_point()
         image_optional_header64()->AddressOfEntryPoint);
 }
 
+BYTE *PE::get_begin(BYTE *pointer)
+{
+    auto section = get_section_by_raw_address(pointer);
+    return data() + section->PointerToRawData;
+}
+
 BYTE *PE::get_end(BYTE *pointer)
 {
     auto section = get_section_by_raw_address(pointer);

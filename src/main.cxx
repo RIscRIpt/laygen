@@ -15,7 +15,7 @@ int wmain(int argc, wchar_t *argv[])
         reflo.set_max_analyzing_threads(128);
         reflo.analyze();
 #else
-        reflo.set_max_analyzing_threads(1);
+        reflo.set_max_analyzing_threads(128);
         reflo.debug(std::cout);
 #endif
     }
