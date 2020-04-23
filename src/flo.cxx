@@ -1,14 +1,13 @@
-#include "cfgraph.hxx"
+#include "flo.hxx"
 
 using namespace rstc;
 
-CFGraph::CFGraph(Address entry_point)
+Flo::Flo(Address entry_point)
     : entry_point(entry_point)
 {
 }
 
-CFGraph::AnalysisResult
-CFGraph::analyze(PE &pe, Address address, Instruction instr)
+Flo::AnalysisResult Flo::analyze(PE &pe, Address address, Instruction instr)
 {
     auto result = disassembly.emplace(address, std::move(instr));
     auto const &instruction = *result.first->second;
@@ -69,7 +68,7 @@ CFGraph::analyze(PE &pe, Address address, Instruction instr)
                 break;
             case Jump::Inner:
                 if (dst < next_address) {
-                    // Looping inside CFGraph
+                    // Looping inside Flo
                     return { InnerJump, nullptr };
                 }
                 break;
@@ -88,7 +87,7 @@ CFGraph::analyze(PE &pe, Address address, Instruction instr)
     return { Next, next_address };
 }
 
-bool CFGraph::is_conditional_jump(ZydisMnemonic mnemonic)
+bool Flo::is_conditional_jump(ZydisMnemonic mnemonic)
 {
     switch (mnemonic) {
     case ZYDIS_MNEMONIC_JB:
@@ -123,7 +122,7 @@ bool CFGraph::is_conditional_jump(ZydisMnemonic mnemonic)
     return false;
 }
 
-CFGraph::SPManipulationType CFGraph::analyze_stack_pointer_manipulation(
+Flo::SPManipulationType Flo::analyze_stack_pointer_manipulation(
     ZydisDecodedInstruction const &instruction)
 {
     if (stack_depth_is_ambiguous()) {
@@ -167,7 +166,7 @@ CFGraph::SPManipulationType CFGraph::analyze_stack_pointer_manipulation(
     return SPUnmodified;
 }
 
-Address CFGraph::get_unanalized_inner_jump_dst() const
+Address Flo::get_unanalized_inner_jump_dst() const
 {
     for (auto it = inner_jumps.begin(), end = inner_jumps.end(); it != end;
          it = inner_jumps.upper_bound(it->first)) {
@@ -178,9 +177,8 @@ Address CFGraph::get_unanalized_inner_jump_dst() const
     return nullptr;
 }
 
-void rstc::CFGraph::promote_unknown_jumps(
-    Jump::Type type,
-    std::function<bool(Address)> predicate)
+void rstc::Flo::promote_unknown_jumps(Jump::Type type,
+                                      std::function<bool(Address)> predicate)
 {
     for (auto ijump = unknown_jumps.begin(); ijump != unknown_jumps.end();) {
         if (!predicate || predicate(ijump->second.dst)) {
@@ -193,7 +191,7 @@ void rstc::CFGraph::promote_unknown_jumps(
     }
 }
 
-void CFGraph::add_jump(Jump::Type type, Address dst, Address src)
+void Flo::add_jump(Jump::Type type, Address dst, Address src)
 {
     switch (type) {
     case Jump::Inner:
@@ -208,12 +206,12 @@ void CFGraph::add_jump(Jump::Type type, Address dst, Address src)
     }
 }
 
-void CFGraph::add_call(Address dst, Address src, Address ret)
+void Flo::add_call(Address dst, Address src, Address ret)
 {
     calls.emplace(src, Call(dst, src, ret));
 }
 
-bool CFGraph::promote_unknown_jumps(Address dst, Jump::Type new_type)
+bool Flo::promote_unknown_jumps(Address dst, Jump::Type new_type)
 {
     bool promoted = false;
     while (true) {
@@ -228,12 +226,15 @@ bool CFGraph::promote_unknown_jumps(Address dst, Jump::Type new_type)
     return promoted;
 }
 
-void CFGraph::visit(Address address)
+void Flo::visit(Address address)
 {
     promote_unknown_jumps(address, Jump::Inner);
 }
 
-Jump::Type CFGraph::get_jump_type(Address dst, Address src, Address next, bool unconditional) const
+Jump::Type Flo::get_jump_type(Address dst,
+                              Address src,
+                              Address next,
+                              bool unconditional) const
 {
     // If jumping with offset 0, i.e. no jump
     if (dst == next) {
@@ -246,7 +247,7 @@ Jump::Type CFGraph::get_jump_type(Address dst, Address src, Address next, bool u
     if (outer_jumps.contains(dst)) {
         return Jump::Outer;
     }
-    // If jump is first cfgraph instruction
+    // If jump is first flo instruction
     if (disassembly.size() == 1 && unconditional) {
         // Assume JMP table
         return Jump::Outer;
@@ -276,12 +277,12 @@ Jump::Type CFGraph::get_jump_type(Address dst, Address src, Address next, bool u
     return Jump::Unknown;
 }
 
-bool CFGraph::stack_depth_is_ambiguous() const
+bool Flo::stack_depth_is_ambiguous() const
 {
     return stack_depth == -1;
 }
 
-bool CFGraph::is_inside(Address address) const
+bool Flo::is_inside(Address address) const
 {
     return disassembly.contains(address) || inner_jumps.contains(address);
 }

@@ -44,15 +44,15 @@ Instruction Reflo::decode_instruction(Address address, Address end)
     return std::move(instruction);
 }
 
-void Reflo::fill_cfgraph(CFGraph &cfgraph)
+void Reflo::fill_flo(Flo &flo)
 {
     Address address;
     Address next_address;
-    if (cfgraph.get_disassembly().empty()) {
-        next_address = cfgraph.entry_point;
+    if (flo.get_disassembly().empty()) {
+        next_address = flo.entry_point;
     }
     else {
-        next_address = cfgraph.get_disassembly().rbegin()->first;
+        next_address = flo.get_disassembly().rbegin()->first;
     }
     Address end = pe_.get_end(next_address);
     while (true) {
@@ -67,14 +67,14 @@ void Reflo::fill_cfgraph(CFGraph &cfgraph)
                          instruction);
 #endif
         auto analysis_status =
-            cfgraph.analyze(pe_, address, std::move(instruction));
+            flo.analyze(pe_, address, std::move(instruction));
         next_address = analysis_status.next_address;
     }
 }
 
-void Reflo::post_fill_cfgraph(CFGraph &cfgraph)
+void Reflo::post_fill_flo(Flo &flo)
 {
-    while (auto address = cfgraph.get_unanalized_inner_jump_dst()) {
+    while (auto address = flo.get_unanalized_inner_jump_dst()) {
         auto next_address = address;
         auto end = pe_.get_end(address);
         while (true) {
@@ -89,7 +89,7 @@ void Reflo::post_fill_cfgraph(CFGraph &cfgraph)
                              instruction);
 #endif
             auto analysis_status =
-                cfgraph.analyze(pe_, address, std::move(instruction));
+                flo.analyze(pe_, address, std::move(instruction));
             next_address = analysis_status.next_address;
         }
     }
@@ -97,25 +97,25 @@ void Reflo::post_fill_cfgraph(CFGraph &cfgraph)
 
 void Reflo::wait_before_analysis_run()
 {
-    cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_), [this] {
+    flos_cv_.wait(std::unique_lock(flos_mutex_), [this] {
         return analyzing_threads_count_ < max_analyzing_threads_;
     });
     ++analyzing_threads_count_;
 }
 
-void Reflo::run_cfgraph_analysis(Address entry_point)
+void Reflo::run_flo_analysis(Address entry_point)
 {
     // Prevent recursive analysis
-    if (created_cfgraphs_.contains(entry_point)) {
+    if (created_flos_.contains(entry_point)) {
         return;
     }
-    created_cfgraphs_.emplace(entry_point);
+    created_flos_.emplace(entry_point);
     wait_before_analysis_run();
     analyzing_threads_.emplace_back([this, entry_point]() mutable {
         try {
             ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
                 --analyzing_threads_count_;
-                cfgraphs_cv_.notify_all();
+                flos_cv_.notify_all();
             });
 
 #ifdef DEBUG_ANALYSIS
@@ -124,85 +124,83 @@ void Reflo::run_cfgraph_analysis(Address entry_point)
                       << '\n';
 #endif
 
-            auto cfgraph = std::make_unique<CFGraph>(entry_point);
-            fill_cfgraph(*cfgraph);
+            auto flo = std::make_unique<Flo>(entry_point);
+            fill_flo(*flo);
 
             {
-                std::lock_guard<std::mutex> adding_cfgraph_guard(
-                    cfgraphs_mutex_);
-                cfgraphs_.emplace(entry_point, std::move(cfgraph));
-                unprocessed_cfgraphs_.push_back(entry_point);
+                std::lock_guard<std::mutex> adding_flo_guard(flos_mutex_);
+                flos_.emplace(entry_point, std::move(flo));
+                unprocessed_flos_.push_back(entry_point);
             }
         }
         catch (zyan_error const &e) {
             std::cerr << std::hex << std::setfill('0')
-                      << "Failed to analyze cfgraph " << std::setw(8)
+                      << "Failed to analyze flo " << std::setw(8)
                       << pe_.raw_to_virtual_address(entry_point) << ", error:\n"
                       << e.what() << '\n';
         }
     });
 }
 
-void Reflo::run_cfgraph_post_analysis(CFGraph &cfgraph)
+void Reflo::run_flo_post_analysis(Flo &flo)
 {
     wait_before_analysis_run();
     analyzing_threads_.emplace_back([&] {
         try {
             ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
                 --analyzing_threads_count_;
-                cfgraphs_cv_.notify_all();
+                flos_cv_.notify_all();
             });
-            post_fill_cfgraph(cfgraph);
+            post_fill_flo(flo);
         }
         catch (zyan_error const &e) {
             std::cerr << std::hex << std::setfill('0')
-                      << "Failed to post analyze cfgraph " << std::setw(8)
-                      << pe_.raw_to_virtual_address(cfgraph.entry_point)
+                      << "Failed to post analyze flo " << std::setw(8)
+                      << pe_.raw_to_virtual_address(flo.entry_point)
                       << ", error:\n"
                       << e.what() << '\n';
         }
     });
 }
 
-Address Reflo::pop_unprocessed_cfgraph()
+Address Reflo::pop_unprocessed_flo()
 {
-    std::lock_guard<std::mutex> popping_cfgraph_guard(cfgraphs_mutex_);
-    auto address = unprocessed_cfgraphs_.front();
-    unprocessed_cfgraphs_.pop_front();
+    std::lock_guard<std::mutex> popping_flo_guard(flos_mutex_);
+    auto address = unprocessed_flos_.front();
+    unprocessed_flos_.pop_front();
     return address;
 }
 
-void Reflo::find_and_analyze_cfgraphs()
+void Reflo::find_and_analyze_flos()
 {
-    run_cfgraph_analysis(pe_.get_entry_point());
+    run_flo_analysis(pe_.get_entry_point());
     while (true) {
-        if (unprocessed_cfgraphs_.empty()) {
+        if (unprocessed_flos_.empty()) {
             // Wait for all analyzing threads
-            cfgraphs_cv_.wait(std::unique_lock(cfgraphs_mutex_),
-                              [this] { return analyzing_threads_count_ == 0; });
+            flos_cv_.wait(std::unique_lock(flos_mutex_),
+                          [this] { return analyzing_threads_count_ == 0; });
         }
-        if (analyzing_threads_count_ == 0 && unprocessed_cfgraphs_.empty()) {
+        if (analyzing_threads_count_ == 0 && unprocessed_flos_.empty()) {
             break;
         }
 
-        auto &cfgraph = cfgraphs_[pop_unprocessed_cfgraph()];
+        auto &flo = flos_[pop_unprocessed_flo()];
 
         // Iterate over unique call destinations
-        for (auto it = cfgraph->get_calls().begin(),
-                  end = cfgraph->get_calls().end();
+        for (auto it = flo->get_calls().begin(), end = flo->get_calls().end();
              it != end;
-             it = cfgraph->get_calls().upper_bound(it->first)) {
+             it = flo->get_calls().upper_bound(it->first)) {
             auto const &jump = it->second;
-            run_cfgraph_analysis(jump.dst);
+            run_flo_analysis(jump.dst);
         }
 
         // Iterate over unique outer jumps
-        for (auto it = cfgraph->get_outer_jumps().begin(),
-                  end = cfgraph->get_outer_jumps().end();
+        for (auto it = flo->get_outer_jumps().begin(),
+                  end = flo->get_outer_jumps().end();
              it != end;
-             it = cfgraph->get_outer_jumps().upper_bound(it->first)) {
+             it = flo->get_outer_jumps().upper_bound(it->first)) {
             auto const &jump = it->second;
-            run_cfgraph_analysis(jump.dst);
+            run_flo_analysis(jump.dst);
         }
     }
     wait_for_analysis();
@@ -211,13 +209,13 @@ void Reflo::find_and_analyze_cfgraphs()
 void Reflo::promote_jumps_to_outer()
 {
     // Promote all unknown jumps to outer jumps
-    // Because we have all cfgraphs, and we can assume that all
-    // unknown jumps from a cfgraphs is "outer"
-    // if dst is in list of existing cfgraphs_.
-    for (auto const &[entry_point, cfgraph] : cfgraphs_) {
-        cfgraph->promote_unknown_jumps(
-            Jump::Outer,
-            [this](Address dst) mutable { return cfgraphs_.contains(dst); });
+    // Because we have all flos, and we can assume that all
+    // unknown jumps from a flos is "outer"
+    // if dst is in list of existing flos_.
+    for (auto const &[entry_point, flo] : flos_) {
+        flo->promote_unknown_jumps(Jump::Outer, [this](Address dst) mutable {
+            return flos_.contains(dst);
+        });
     }
 }
 
@@ -226,34 +224,34 @@ void Reflo::promote_jumps_to_inner()
     // Promote all unknown jumps to inner jumps,
     // as some unknown jumps were promoted to outer jumps,
     // the remaining jumps should be inner jumps.
-    for (auto const &[entry_point, cfgraph] : cfgraphs_) {
-        bool needs_post_analysis = !cfgraph->get_unknown_jumps().empty();
-        cfgraph->promote_unknown_jumps(Jump::Inner);
+    for (auto const &[entry_point, flo] : flos_) {
+        bool needs_post_analysis = !flo->get_unknown_jumps().empty();
+        flo->promote_unknown_jumps(Jump::Inner);
         if (needs_post_analysis) {
-            unprocessed_cfgraphs_.push_back(entry_point);
+            unprocessed_flos_.push_back(entry_point);
         }
     }
 }
 
-void Reflo::post_analyze_cfgraphs()
+void Reflo::post_analyze_flos()
 {
-    while (!unprocessed_cfgraphs_.empty()) {
-        auto &cfgraph = cfgraphs_[pop_unprocessed_cfgraph()];
-        run_cfgraph_post_analysis(*cfgraph);
+    while (!unprocessed_flos_.empty()) {
+        auto &flo = flos_[pop_unprocessed_flo()];
+        run_flo_post_analysis(*flo);
     }
     wait_for_analysis();
 }
 
 void Reflo::analyze()
 {
-    find_and_analyze_cfgraphs();
+    find_and_analyze_flos();
     while (unknown_jumps_exist()) {
         promote_jumps_to_outer();
         // Tehnically, we can't promote unknown jumps to inner jumps, as
-        // we still haven't explored the program as a whole, and some cfgraphs
+        // we still haven't explored the program as a whole, and some flos
         // (functions) might be unlisted yet.
         promote_jumps_to_inner();
-        post_analyze_cfgraphs();
+        post_analyze_flos();
     }
 }
 
@@ -267,11 +265,9 @@ void Reflo::wait_for_analysis()
 
 bool Reflo::unknown_jumps_exist() const
 {
-    return std::any_of(cfgraphs_.cbegin(),
-                       cfgraphs_.cend(),
-                       [this](auto const &cfgraph) {
-                           return !cfgraph.second->get_unknown_jumps().empty();
-                       });
+    return std::any_of(flos_.cbegin(), flos_.cend(), [this](auto const &flo) {
+        return !flo.second->get_unknown_jumps().empty();
+    });
 }
 
 void Reflo::set_max_analyzing_threads(size_t amount)
@@ -284,8 +280,8 @@ void Reflo::set_max_analyzing_threads(size_t amount)
 void Reflo::debug(std::ostream &os)
 {
     analyze();
-    for (auto const &f : cfgraphs_) {
-        dump_cfgraph(os, formatter_, *f.second);
+    for (auto const &f : flos_) {
+        dump_flo(os, formatter_, *f.second);
     }
 }
 
@@ -303,15 +299,14 @@ void Reflo::dump_instruction(std::ostream &os,
        << buffer << '\n';
 }
 
-void Reflo::dump_cfgraph(std::ostream &os,
-                         ZydisFormatter const &formatter,
-                         CFGraph const &cfgraph)
+void Reflo::dump_flo(std::ostream &os,
+                     ZydisFormatter const &formatter,
+                     Flo const &flo)
 {
     char buffer[256];
     os << std::hex << std::setfill('0');
-    os << std::setw(8) << pe_.raw_to_virtual_address(cfgraph.entry_point)
-       << ":\n";
-    for (auto const &[address, instruction] : cfgraph.get_disassembly()) {
+    os << std::setw(8) << pe_.raw_to_virtual_address(flo.entry_point) << ":\n";
+    for (auto const &[address, instruction] : flo.get_disassembly()) {
         auto va = pe_.raw_to_virtual_address(address);
         dump_instruction(os, va, *instruction);
     }

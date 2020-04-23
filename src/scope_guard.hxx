@@ -1,13 +1,12 @@
 #pragma once
 
-#include <utility>
 #include <type_traits>
+#include <utility>
 
 namespace rstc {
 
     template<typename Callback>
-    class ScopeGuard final
-    {
+    class ScopeGuard final {
     public:
         ScopeGuard(Callback &&callback)
             : callback_(std::forward<Callback>(callback))

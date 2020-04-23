@@ -47,7 +47,7 @@ namespace rstc {
 
     using Disassembly = std::map<Address, Instruction>;
 
-    class CFGraph {
+    class Flo {
     public:
         enum AnalysisStatus {
             Next,
@@ -68,7 +68,7 @@ namespace rstc {
             Address const next_address;
         };
 
-        CFGraph(Address entry_point = nullptr);
+        Flo(Address entry_point = nullptr);
 
         AnalysisResult analyze(PE &pe, Address address, Instruction instr);
         Address get_unanalized_inner_jump_dst() const;
@@ -90,7 +90,10 @@ namespace rstc {
 
     private:
         bool is_inside(Address address) const;
-        Jump::Type get_jump_type(Address dst, Address src, Address next, bool unconditional) const;
+        Jump::Type get_jump_type(Address dst,
+                                 Address src,
+                                 Address next,
+                                 bool unconditional) const;
 
         SPManipulationType analyze_stack_pointer_manipulation(
             ZydisDecodedInstruction const &instruction);
