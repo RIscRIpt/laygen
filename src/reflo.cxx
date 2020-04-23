@@ -22,268 +22,6 @@ using namespace rstc;
         }                              \
     } while (0)
 
-Reflo::CFGraph::CFGraph(Address entry_point)
-    : entry_point(entry_point)
-{
-}
-
-Reflo::CFGraph::AnalysisResult
-Reflo::CFGraph::analyze(PE &pe, Address address, Instruction instr)
-{
-    auto result = disassembly.emplace(address, std::move(instr));
-    auto const &instruction = *result.first->second;
-    Address next_address = address + instruction.length;
-    visit(address);
-    if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL) {
-        // Assume calls always return (i.e. they are not no-return)
-        auto const &op = instruction.operands[0];
-        switch (op.type) {
-        case ZYDIS_OPERAND_TYPE_IMMEDIATE:
-            add_call(next_address + instruction.operands[0].imm.value.s,
-                     address,
-                     next_address);
-            break;
-            /*
-        case ZYDIS_OPERAND_TYPE_MEMORY:
-            if (op.mem.type == ZYDIS_MEMOP_TYPE_MEM
-                && op.mem.segment == ZYDIS_REGISTER_DS
-                && op.mem.base == ZYDIS_REGISTER_RIP
-                && op.mem.index == ZYDIS_REGISTER_NONE && op.mem.scale == 0
-                && op.mem.disp.has_displacement) {
-                Address dst_addr = next_address + op.mem.disp.value;
-                Address dst = *reinterpret_cast<Address *>(dst_addr); // dst is
-        invalid (virtual / without relocation) if (dst != nullptr) {
-                    add_call(dst, address, next_address);
-                }
-            }
-            break;
-            */
-        }
-    }
-    else if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
-        has_ret = true;
-        if (!is_inside(next_address)) {
-            return { Complete, nullptr };
-        }
-    }
-    else if (instruction.mnemonic == ZYDIS_MNEMONIC_JMP
-             || is_conditional_jump(instruction.mnemonic)) {
-        bool unconditional = instruction.mnemonic == ZYDIS_MNEMONIC_JMP;
-        auto const &op = instruction.operands[0];
-        Address dst = nullptr;
-        Jump::Type type = Jump::Unknown;
-        if (op.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-            dst = next_address + instruction.operands[0].imm.value.s;
-            type = get_jump_type(dst, address, next_address);
-            add_jump(type, dst, address);
-        }
-        else {
-            return { UnknownJump, nullptr };
-        }
-        // TODO: Support more op.type-s.
-        if (unconditional) {
-            switch (type) {
-            case Jump::Unknown:
-                if (!promote_unknown_jump(next_address, Jump::Inner)) {
-                    return { UnknownJump, nullptr };
-                }
-                break;
-            case Jump::Inner:
-                if (dst < next_address) {
-                    // Looping inside CFGraph
-                    return { InnerJump, nullptr };
-                }
-                break;
-            case Jump::Outer:
-                //
-                return { OuterJump, nullptr };
-            }
-        }
-    }
-    else {
-        auto sp_status = analyze_stack_pointer_manipulation(instruction);
-        if (sp_status == SPModified) {
-            stack_was_modified = true;
-        }
-    }
-    return { Next, next_address };
-}
-
-bool Reflo::CFGraph::is_conditional_jump(ZydisMnemonic mnemonic)
-{
-    switch (mnemonic) {
-    case ZYDIS_MNEMONIC_JB:
-    case ZYDIS_MNEMONIC_JBE:
-    case ZYDIS_MNEMONIC_JCXZ:
-    case ZYDIS_MNEMONIC_JECXZ:
-    case ZYDIS_MNEMONIC_JKNZD:
-    case ZYDIS_MNEMONIC_JKZD:
-    case ZYDIS_MNEMONIC_JL:
-    case ZYDIS_MNEMONIC_JLE:
-    case ZYDIS_MNEMONIC_JMP:
-    case ZYDIS_MNEMONIC_JNB:
-    case ZYDIS_MNEMONIC_JNBE:
-    case ZYDIS_MNEMONIC_JNL:
-    case ZYDIS_MNEMONIC_JNLE:
-    case ZYDIS_MNEMONIC_JNO:
-    case ZYDIS_MNEMONIC_JNP:
-    case ZYDIS_MNEMONIC_JNS:
-    case ZYDIS_MNEMONIC_JNZ:
-    case ZYDIS_MNEMONIC_JO:
-    case ZYDIS_MNEMONIC_JP:
-    case ZYDIS_MNEMONIC_JRCXZ:
-    case ZYDIS_MNEMONIC_JS:
-    case ZYDIS_MNEMONIC_JZ:
-        // Jxx
-    case ZYDIS_MNEMONIC_LOOP:
-    case ZYDIS_MNEMONIC_LOOPE:
-    case ZYDIS_MNEMONIC_LOOPNE:
-        // LOOPxx
-        return true;
-    }
-    return false;
-}
-
-Reflo::CFGraph::SPManipulationType
-Reflo::CFGraph::analyze_stack_pointer_manipulation(
-    ZydisDecodedInstruction const &instruction)
-{
-    if (instruction.operand_count == 2) {
-        auto const &dst = instruction.operands[0];
-        auto const &src = instruction.operands[1];
-        if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER
-            && dst.reg.value == ZYDIS_REGISTER_RSP) {
-            if (src.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
-                switch (instruction.mnemonic) {
-                case ZYDIS_MNEMONIC_ADD:
-                    stack_depth -= src.imm.value.s;
-                    return SPModified;
-                case ZYDIS_MNEMONIC_SUB:
-                    stack_depth += src.imm.value.s;
-                    return SPModified;
-                default: stack_depth = -1; return SPAmbiguous;
-                }
-            }
-            else {
-                stack_depth = -1;
-                return SPAmbiguous;
-            }
-        }
-    }
-    else {
-        switch (instruction.mnemonic) {
-        case ZYDIS_MNEMONIC_PUSH: stack_depth += 8; return SPModified;
-        case ZYDIS_MNEMONIC_PUSHF: stack_depth += 2; return SPModified;
-        case ZYDIS_MNEMONIC_PUSHFD: stack_depth += 4; return SPModified;
-        case ZYDIS_MNEMONIC_PUSHFQ: stack_depth += 8; return SPModified;
-
-        case ZYDIS_MNEMONIC_POP: stack_depth -= 8; return SPModified;
-        case ZYDIS_MNEMONIC_POPF: stack_depth -= 2; return SPModified;
-        case ZYDIS_MNEMONIC_POPFD: stack_depth -= 4; return SPModified;
-        case ZYDIS_MNEMONIC_POPFQ: stack_depth -= 8; return SPModified;
-        }
-    }
-    return SPUnmodified;
-}
-
-Address Reflo::CFGraph::get_unanalized_inner_jump_dst() const
-{
-    for (auto it = inner_jumps.begin(), end = inner_jumps.end(); it != end;
-         it = inner_jumps.upper_bound(it->first)) {
-        if (!disassembly.contains(it->first)) {
-            return it->first;
-        }
-    }
-    return nullptr;
-}
-
-void Reflo::CFGraph::add_jump(Jump::Type type, Address dst, Address src)
-{
-    switch (type) {
-    case Jump::Inner:
-        inner_jumps.emplace(dst, Jump(Jump::Inner, dst, src));
-        break;
-    case Jump::Outer:
-        outer_jumps.emplace(dst, Jump(Jump::Outer, dst, src));
-        break;
-    case Jump::Unknown:
-        unknown_jumps.emplace(dst, Jump(Jump::Unknown, dst, src));
-        break;
-    }
-}
-
-void Reflo::CFGraph::add_call(Address dst, Address src, Address ret)
-{
-    calls.emplace(src, Call(dst, src, ret));
-}
-
-bool Reflo::CFGraph::promote_unknown_jump(Address dst, Jump::Type new_type)
-{
-    bool promoted = false;
-    while (true) {
-        if (auto jump = unknown_jumps.extract(dst); !jump.empty()) {
-            promoted = true;
-            add_jump(new_type, dst, jump.mapped().src);
-        }
-        else {
-            break;
-        }
-    }
-    return promoted;
-}
-
-void Reflo::CFGraph::visit(Address address)
-{
-    promote_unknown_jump(address, Jump::Inner);
-}
-
-Reflo::Jump::Type
-Reflo::CFGraph::get_jump_type(Address dst, Address src, Address next) const
-{
-    // If jumping with offset 0, i.e. no jump
-    if (dst == next) {
-        return Jump::Inner;
-    }
-    // If jump is first cfgraph instruction
-    if (disassembly.size() == 1) {
-        // Assume JMP table
-        return Jump::Outer;
-    }
-    // If destination is one of the previous instructions
-    if (disassembly.contains(dst)) {
-        return Jump::Inner;
-    }
-    // If jumping above entry-point
-    if (dst < entry_point) {
-        // Assume no inner jumps are made above entry-point
-        return Jump::Outer;
-    }
-    if (!stack_depth_is_ambiguous()) {
-        if (stack_depth != 0) {
-            // Assume no outer jumps are made with dirty stack
-            return Jump::Inner;
-        }
-        else {
-            // If stack depth was modified previously, and returned to 0
-            // Assume outer jump (optimized tail call).
-            if (stack_was_modified) {
-                return Jump::Outer;
-            }
-        }
-    }
-    return Jump::Unknown;
-}
-
-bool Reflo::CFGraph::stack_depth_is_ambiguous() const
-{
-    return stack_depth == -1;
-}
-
-bool Reflo::CFGraph::is_inside(Address address) const
-{
-    return disassembly.contains(address) || inner_jumps.contains(address);
-}
-
 Reflo::Reflo(std::filesystem::path const &pe_path)
     : pe_(pe_path)
     , max_analyzing_threads_(std::thread::hardware_concurrency())
@@ -310,11 +48,11 @@ void Reflo::fill_cfgraph(CFGraph &cfgraph)
 {
     Address address;
     Address next_address;
-    if (cfgraph.disassembly.empty()) {
+    if (cfgraph.get_disassembly().empty()) {
         next_address = cfgraph.entry_point;
     }
     else {
-        next_address = cfgraph.disassembly.rbegin()->first;
+        next_address = cfgraph.get_disassembly().rbegin()->first;
     }
     Address end = pe_.get_end(next_address);
     while (true) {
@@ -450,18 +188,19 @@ void Reflo::find_and_analyze_cfgraphs()
         auto &cfgraph = cfgraphs_[pop_unprocessed_cfgraph()];
 
         // Iterate over unique call destinations
-        for (auto it = cfgraph->calls.begin(), end = cfgraph->calls.end();
+        for (auto it = cfgraph->get_calls().begin(),
+                  end = cfgraph->get_calls().end();
              it != end;
-             it = cfgraph->calls.upper_bound(it->first)) {
+             it = cfgraph->get_calls().upper_bound(it->first)) {
             auto const &jump = it->second;
             run_cfgraph_analysis(jump.dst);
         }
 
         // Iterate over unique outer jumps
-        for (auto it = cfgraph->outer_jumps.begin(),
-                  end = cfgraph->outer_jumps.end();
+        for (auto it = cfgraph->get_outer_jumps().begin(),
+                  end = cfgraph->get_outer_jumps().end();
              it != end;
-             it = cfgraph->outer_jumps.upper_bound(it->first)) {
+             it = cfgraph->get_outer_jumps().upper_bound(it->first)) {
             auto const &jump = it->second;
             run_cfgraph_analysis(jump.dst);
         }
@@ -476,18 +215,9 @@ void Reflo::promote_jumps_to_outer()
     // unknown jumps from a cfgraphs is "outer"
     // if dst is in list of existing cfgraphs_.
     for (auto const &[entry_point, cfgraph] : cfgraphs_) {
-        for (auto ijump = cfgraph->unknown_jumps.begin();
-             ijump != cfgraph->unknown_jumps.end();) {
-            if (cfgraphs_.contains(ijump->second.dst)) {
-                cfgraph->add_jump(Jump::Outer,
-                                  ijump->second.dst,
-                                  ijump->second.src);
-                ijump = cfgraph->unknown_jumps.erase(ijump);
-            }
-            else {
-                ++ijump;
-            }
-        }
+        cfgraph->promote_unknown_jumps(
+            Jump::Outer,
+            [this](Address dst) mutable { return cfgraphs_.contains(dst); });
     }
 }
 
@@ -497,14 +227,8 @@ void Reflo::promote_jumps_to_inner()
     // as some unknown jumps were promoted to outer jumps,
     // the remaining jumps should be inner jumps.
     for (auto const &[entry_point, cfgraph] : cfgraphs_) {
-        bool needs_post_analysis = !cfgraph->unknown_jumps.empty();
-        while (!cfgraph->unknown_jumps.empty()) {
-            auto ijump = cfgraph->unknown_jumps.begin();
-            cfgraph->add_jump(Jump::Inner,
-                              ijump->second.dst,
-                              ijump->second.src);
-            cfgraph->unknown_jumps.erase(ijump);
-        }
+        bool needs_post_analysis = !cfgraph->get_unknown_jumps().empty();
+        cfgraph->promote_unknown_jumps(Jump::Inner);
         if (needs_post_analysis) {
             unprocessed_cfgraphs_.push_back(entry_point);
         }
@@ -546,7 +270,7 @@ bool Reflo::unknown_jumps_exist() const
     return std::any_of(cfgraphs_.cbegin(),
                        cfgraphs_.cend(),
                        [this](auto const &cfgraph) {
-                           return !cfgraph.second->unknown_jumps.empty();
+                           return !cfgraph.second->get_unknown_jumps().empty();
                        });
 }
 
@@ -587,7 +311,7 @@ void Reflo::dump_cfgraph(std::ostream &os,
     os << std::hex << std::setfill('0');
     os << std::setw(8) << pe_.raw_to_virtual_address(cfgraph.entry_point)
        << ":\n";
-    for (auto const &[address, instruction] : cfgraph.disassembly) {
+    for (auto const &[address, instruction] : cfgraph.get_disassembly()) {
         auto va = pe_.raw_to_virtual_address(address);
         dump_instruction(os, va, *instruction);
     }

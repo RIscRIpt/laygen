@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pe.hxx"
+#include "cfgraph.hxx"
 
 #include <Zydis/Zydis.h>
 
@@ -15,100 +16,7 @@
 
 namespace rstc {
 
-    using Address = BYTE *;
-    using Instruction = std::unique_ptr<ZydisDecodedInstruction>;
-
     class Reflo {
-    public:
-        struct Jump {
-            enum Type {
-                Unknown,
-                Inner,
-                Outer,
-            };
-            Jump(Type type, Address dst, Address src)
-                : type(type)
-                , dst(dst)
-                , src(src)
-            {
-            }
-            Type const type;
-            Address const dst;
-            Address const src;
-        };
-
-        // Destination -> Jump
-        using Jumps = std::multimap<Address, Jump>;
-
-        struct Call : public Jump {
-            Call(Address dst, Address src, Address ret)
-                : Jump(Jump::Outer, dst, src)
-                , ret(ret)
-            {
-            }
-            Address const ret;
-        };
-
-        // Destination -> Call
-        using Calls = std::multimap<Address, Call>;
-
-        using Disassembly = std::map<Address, Instruction>;
-
-    private:
-        class CFGraph {
-        public:
-            enum AnalysisStatus {
-                Next,
-                UnknownJump,
-                InnerJump,
-                OuterJump,
-                Complete,
-            };
-
-            enum SPManipulationType {
-                SPModified,
-                SPUnmodified,
-                SPAmbiguous,
-            };
-
-            struct AnalysisResult {
-                AnalysisStatus const status;
-                Address const next_address;
-            };
-
-            CFGraph(Address entry_point = nullptr);
-
-            AnalysisResult analyze(PE &pe, Address address, Instruction instr);
-            SPManipulationType analyze_stack_pointer_manipulation(
-                ZydisDecodedInstruction const &instruction);
-            Address get_unanalized_inner_jump_dst() const;
-
-            void add_jump(Jump::Type type, Address dst, Address src);
-            void add_call(Address dst, Address src, Address ret);
-
-            bool stack_depth_is_ambiguous() const;
-
-            Address const entry_point;
-            Disassembly disassembly;
-            Jumps inner_jumps;
-            Jumps outer_jumps;
-            Jumps unknown_jumps;
-            Calls calls;
-            bool has_ret = false;
-            int stack_depth = 0;
-            bool stack_was_modified = false;
-
-        private:
-            bool is_inside(Address address) const;
-            Jump::Type
-            get_jump_type(Address dst, Address src, Address next) const;
-
-            void visit(Address address);
-            bool promote_unknown_jump(Address dst, Jump::Type new_type);
-
-            static bool is_conditional_jump(ZydisMnemonic mnemonic);
-        };
-
     public:
         Reflo(std::filesystem::path const &pe_path);
 
