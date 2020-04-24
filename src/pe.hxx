@@ -13,45 +13,46 @@ namespace rstc {
     public:
         class Sections {
         public:
-            Sections(PIMAGE_SECTION_HEADER begin, PIMAGE_SECTION_HEADER end)
+            Sections(IMAGE_SECTION_HEADER const *begin,
+                     IMAGE_SECTION_HEADER const *end)
                 : begin_(begin)
                 , end_(end)
             {
             }
 
-            inline PIMAGE_SECTION_HEADER begin() { return begin_; }
-            inline PIMAGE_SECTION_HEADER end() { return end_; }
+            inline IMAGE_SECTION_HEADER const *begin() const { return begin_; }
+            inline IMAGE_SECTION_HEADER const *end() const { return end_; }
 
         private:
-            PIMAGE_SECTION_HEADER begin_;
-            PIMAGE_SECTION_HEADER end_;
+            IMAGE_SECTION_HEADER const *begin_;
+            IMAGE_SECTION_HEADER const *end_;
         };
 
         PE(std::filesystem::path const &path);
 
-        BYTE *data();
-        PIMAGE_DOS_HEADER image_dos_header();
-        PIMAGE_FILE_HEADER image_file_header();
-        PIMAGE_OPTIONAL_HEADER32 image_optional_header32();
-        PIMAGE_OPTIONAL_HEADER64 image_optional_header64();
-        Sections image_sections();
+        BYTE const *data() const;
+        IMAGE_DOS_HEADER const *image_dos_header() const;
+        IMAGE_FILE_HEADER const *image_file_header() const;
+        IMAGE_OPTIONAL_HEADER64 const *image_optional_header64() const;
+        Sections const image_sections() const;
 
-        BYTE *virtual_to_raw_address(DWORD va);
-        DWORD raw_to_virtual_address(BYTE *pointer);
+        BYTE const *virtual_to_raw_address(DWORD va) const;
+        DWORD raw_to_virtual_address(BYTE const *pointer) const;
 
-        BYTE *get_entry_point();
+        BYTE const *get_entry_point() const;
 
-        BYTE *get_begin(BYTE *pointer);
-        BYTE *get_end(BYTE *pointer);
+        BYTE const *get_begin(BYTE const *pointer) const;
+        BYTE const *get_end(BYTE const *pointer) const;
 
     private:
-        PIMAGE_NT_HEADERS image_nt_headers();
-        PIMAGE_SECTION_HEADER image_first_section();
-        PIMAGE_SECTION_HEADER get_section_by_raw_address(BYTE *pointer);
+        IMAGE_NT_HEADERS const *image_nt_headers() const;
+        IMAGE_SECTION_HEADER const *image_first_section() const;
+        IMAGE_SECTION_HEADER const *
+        get_section_by_raw_address(BYTE const *pointer) const;
 
         Bytes bytes_;
-        std::vector<PIMAGE_SECTION_HEADER> sections_by_va_;
-        std::vector<PIMAGE_SECTION_HEADER> sections_by_raw_data_;
+        std::vector<IMAGE_SECTION_HEADER const *> sections_by_va_;
+        std::vector<IMAGE_SECTION_HEADER const *> sections_by_raw_data_;
     };
 
 }

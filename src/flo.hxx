@@ -10,7 +10,7 @@
 
 namespace rstc {
 
-    using Address = BYTE *;
+    using Address = BYTE const *;
     using Instruction = std::unique_ptr<ZydisDecodedInstruction>;
 
     struct Jump {

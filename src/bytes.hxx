@@ -12,7 +12,7 @@ namespace rstc {
 
         Bytes(std::filesystem::path const &path);
 
-        Container::value_type *data();
+        Container::value_type const *data() const;
 
     private:
         Container bytes_;

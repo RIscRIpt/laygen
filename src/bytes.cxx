@@ -17,7 +17,7 @@ Bytes::Bytes(std::filesystem::path const &path)
     file.read(reinterpret_cast<char *>(bytes_.data()), bytes_.size());
 }
 
-Bytes::Container::value_type *Bytes::data()
+Bytes::Container::value_type const *Bytes::data() const
 {
     return bytes_.data();
 }
