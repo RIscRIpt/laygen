@@ -7,6 +7,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 
 namespace rstc {
 
@@ -34,12 +35,14 @@ namespace rstc {
     using Jumps = std::multimap<Address, Jump>;
 
     struct Call : public Jump {
-        Call(Address dst, Address src, Address ret)
+        Call(Address dst, Address src, Address ret, int args = -1)
             : Jump(Jump::Outer, dst, src)
             , ret(ret)
+            , args(args == -1 ? std::optional<int>(std::nullopt) : args)
         {
         }
         Address const ret;
+        std::optional<int> args;
     };
 
     // Destination -> Call
@@ -70,7 +73,10 @@ namespace rstc {
 
         Flo(Address entry_point = nullptr);
 
-        AnalysisResult analyze(PE &pe, Address address, Instruction instr);
+        AnalysisResult analyze(PE &pe,
+                               Address address,
+                               Instruction instr,
+                               std::optional<Address> flo_end = std::nullopt);
         Address get_unanalized_inner_jump_dst() const;
 
         void
@@ -89,11 +95,14 @@ namespace rstc {
         Address const entry_point;
 
     private:
-        bool is_inside(Address address) const;
-        Jump::Type get_jump_type(Address dst,
-                                 Address src,
-                                 Address next,
-                                 bool unconditional) const;
+        bool is_inside(Address address,
+                       std::optional<Address> flo_end = std::nullopt) const;
+        Jump::Type
+        get_jump_type(Address dst,
+                      Address src,
+                      Address next,
+                      bool unconditional,
+                      std::optional<Address> flo_end = std::nullopt) const;
 
         SPManipulationType analyze_stack_pointer_manipulation(
             ZydisDecodedInstruction const &instruction);

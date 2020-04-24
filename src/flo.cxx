@@ -7,7 +7,10 @@ Flo::Flo(Address entry_point)
 {
 }
 
-Flo::AnalysisResult Flo::analyze(PE &pe, Address address, Instruction instr)
+Flo::AnalysisResult Flo::analyze(PE &pe,
+                                 Address address,
+                                 Instruction instr,
+                                 std::optional<Address> flo_end)
 {
     auto result = disassembly.emplace(address, std::move(instr));
     auto const &instruction = *result.first->second;
@@ -40,8 +43,8 @@ Flo::AnalysisResult Flo::analyze(PE &pe, Address address, Instruction instr)
         }
     }
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
-        if (!is_inside(next_address)) {
-            return { Complete, nullptr };
+        if (!is_inside(next_address) && !flo_end) {
+            return { Complete, next_address };
         }
     }
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_JMP
@@ -52,29 +55,34 @@ Flo::AnalysisResult Flo::analyze(PE &pe, Address address, Instruction instr)
         Jump::Type type = Jump::Unknown;
         if (op.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
             dst = next_address + instruction.operands[0].imm.value.s;
-            type = get_jump_type(dst, address, next_address, unconditional);
+            type = get_jump_type(dst,
+                                 address,
+                                 next_address,
+                                 unconditional,
+                                 flo_end);
             add_jump(type, dst, address);
         }
         else {
-            return { UnknownJump, nullptr };
+            return { UnknownJump, next_address };
         }
         // TODO: Support more op.type-s.
         if (unconditional) {
             switch (type) {
             case Jump::Unknown:
                 if (!promote_unknown_jumps(next_address, Jump::Inner)) {
-                    return { UnknownJump, nullptr };
+                    return { UnknownJump, next_address };
                 }
                 break;
             case Jump::Inner:
-                if (dst < next_address) {
-                    // Looping inside Flo
-                    return { InnerJump, nullptr };
+                if (!is_inside(next_address)) {
+                    return { InnerJump, next_address };
                 }
                 break;
             case Jump::Outer:
-                //
-                return { OuterJump, nullptr };
+                if (!is_inside(next_address)) {
+                    return { OuterJump, next_address };
+                }
+                break;
             }
         }
     }
@@ -234,8 +242,17 @@ void Flo::visit(Address address)
 Jump::Type Flo::get_jump_type(Address dst,
                               Address src,
                               Address next,
-                              bool unconditional) const
+                              bool unconditional,
+                              std::optional<Address> flo_end) const
 {
+    // If we have end of flo,
+    // we can easily check whether it is inner or outer jump
+    if (flo_end) {
+        if (dst >= entry_point && dst < flo_end) {
+            return Jump::Inner;
+        }
+        return Jump::Outer;
+    }
     // If jumping with offset 0, i.e. no jump
     if (dst == next) {
         return Jump::Inner;
@@ -282,7 +299,10 @@ bool Flo::stack_depth_is_ambiguous() const
     return stack_depth == -1;
 }
 
-bool Flo::is_inside(Address address) const
+bool Flo::is_inside(Address address, std::optional<Address> flo_end) const
 {
+    if (flo_end) {
+        return address >= entry_point && address < flo_end;
+    }
     return disassembly.contains(address) || inner_jumps.contains(address);
 }

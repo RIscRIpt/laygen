@@ -30,6 +30,10 @@ PE::PE(std::filesystem::path const &path)
               [](IMAGE_SECTION_HEADER const *a, IMAGE_SECTION_HEADER const *b) {
                   return a->PointerToRawData < b->PointerToRawData;
               });
+    for (auto const &runtime_function : runtime_functions()) {
+        runtime_function_map_.emplace(runtime_function.BeginAddress,
+                                      &runtime_function);
+    }
 }
 
 BYTE const *PE::data() const
@@ -80,10 +84,34 @@ IMAGE_OPTIONAL_HEADER64 const *PE::image_optional_header64() const
                 ->OptionalHeader;
 }
 
-PE::Sections const PE::image_sections() const
+PE::Sections PE::image_sections() const
 {
     IMAGE_SECTION_HEADER const *begin = image_first_section();
     return Sections(begin, begin + image_file_header()->NumberOfSections);
+}
+
+PE::RuntimeFunctions PE::runtime_functions() const
+{
+    IMAGE_DATA_DIRECTORY const &directory_exception =
+        image_optional_header64()
+            ->DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+    if (!directory_exception.Size) {
+        return RuntimeFunctions(nullptr, nullptr);
+    }
+    RUNTIME_FUNCTION const *begin = reinterpret_cast<RUNTIME_FUNCTION const *>(
+        virtual_to_raw_address(directory_exception.VirtualAddress));
+    RUNTIME_FUNCTION const *end =
+        begin + directory_exception.Size / sizeof(RUNTIME_FUNCTION);
+    return RuntimeFunctions(begin, end);
+}
+
+RUNTIME_FUNCTION const *PE::get_runtime_function(DWORD va) const
+{
+    if (auto it = runtime_function_map_.find(va);
+        it != runtime_function_map_.end()) {
+        return it->second;
+    }
+    return nullptr;
 }
 
 BYTE const *PE::virtual_to_raw_address(DWORD va) const

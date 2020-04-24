@@ -38,16 +38,21 @@ Instruction Reflo::decode_instruction(Address address, Address end)
 void Reflo::fill_flo(Flo &flo)
 {
     Address address;
-    Address next_address;
     if (flo.get_disassembly().empty()) {
-        next_address = flo.entry_point;
+        address = flo.entry_point;
     }
     else {
-        next_address = flo.get_disassembly().rbegin()->first;
+        address = flo.get_disassembly().rbegin()->first;
     }
-    Address end = pe_.get_end(next_address);
+    Address end = pe_.get_end(address);
+    std::optional<Address> real_end_address;
+    auto runtime_function =
+        pe_.get_runtime_function(pe_.raw_to_virtual_address(flo.entry_point));
+    if (runtime_function && runtime_function->EndAddress) {
+        end = pe_.virtual_to_raw_address(runtime_function->EndAddress);
+        real_end_address = end;
+    }
     while (true) {
-        address = next_address;
         if (address == nullptr || address >= end) {
             break;
         }
@@ -57,19 +62,25 @@ void Reflo::fill_flo(Flo &flo)
                          pe_.raw_to_virtual_address(address),
                          instruction);
 #endif
-        auto analysis_status =
-            flo.analyze(pe_, address, std::move(instruction));
-        next_address = analysis_status.next_address;
+        auto analysis_result =
+            flo.analyze(pe_, address, std::move(instruction), real_end_address);
+        if (analysis_result.status != Flo::Next && !real_end_address) {
+            break;
+        }
+        address = analysis_result.next_address;
     }
 }
 
 void Reflo::post_fill_flo(Flo &flo)
 {
+    // Post fill/analysis cannot happen for functions with defined boundaries,
+    // which can be found in RUNTIME_FUNCTION.
+    auto runtime_function =
+        pe_.get_runtime_function(pe_.raw_to_virtual_address(flo.entry_point));
+    assert(!runtime_function);
     while (auto address = flo.get_unanalized_inner_jump_dst()) {
-        auto next_address = address;
         auto end = pe_.get_end(address);
         while (true) {
-            address = next_address;
             if (address == nullptr || address >= end) {
                 break;
             }
@@ -79,9 +90,12 @@ void Reflo::post_fill_flo(Flo &flo)
                              pe_.raw_to_virtual_address(address),
                              instruction);
 #endif
-            auto analysis_status =
+            auto analysis_result =
                 flo.analyze(pe_, address, std::move(instruction));
-            next_address = analysis_status.next_address;
+            if (analysis_result.status != Flo::Next) {
+                break;
+            }
+            address = analysis_result.next_address;
         }
     }
 }
