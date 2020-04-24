@@ -1,4 +1,6 @@
 #include "reflo.hxx"
+
+#include "dumper.hxx"
 #include "scope_guard.hxx"
 #include "zyan_error.hxx"
 
@@ -14,14 +16,6 @@
 
 using namespace rstc;
 
-#define ZYAN_THROW(expr)               \
-    do {                               \
-        ZyanStatus _status = (expr);   \
-        if (ZYAN_FAILED(_status)) {    \
-            throw zyan_error(_status); \
-        }                              \
-    } while (0)
-
 Reflo::Reflo(std::filesystem::path const &pe_path)
     : pe_(pe_path)
     , max_analyzing_threads_(std::thread::hardware_concurrency())
@@ -29,9 +23,6 @@ Reflo::Reflo(std::filesystem::path const &pe_path)
     ZYAN_THROW(ZydisDecoderInit(&decoder_,
                                 ZYDIS_MACHINE_MODE_LONG_64,
                                 ZYDIS_ADDRESS_WIDTH_64));
-#ifndef NDEBUG
-    ZYAN_THROW(ZydisFormatterInit(&formatter_, ZYDIS_FORMATTER_STYLE_INTEL));
-#endif
 }
 
 Instruction Reflo::decode_instruction(Address address, Address end)
@@ -279,38 +270,13 @@ void Reflo::set_max_analyzing_threads(size_t amount)
 
 void Reflo::debug(std::ostream &os)
 {
+    Dumper dumper;
     analyze();
     for (auto const &f : flos_) {
-        dump_flo(os, formatter_, *f.second);
+        dumper.dump_flo(os,
+                        *f.second,
+                        pe_.raw_to_virtual_address(f.second->entry_point));
     }
-}
-
-void Reflo::dump_instruction(std::ostream &os,
-                             DWORD va,
-                             ZydisDecodedInstruction const &instruction)
-{
-    char buffer[256];
-    ZYAN_THROW(ZydisFormatterFormatInstruction(&formatter_,
-                                               &instruction,
-                                               buffer,
-                                               sizeof(buffer),
-                                               va));
-    os << std::hex << std::setfill('0') << std::setw(8) << va << "    "
-       << buffer << '\n';
-}
-
-void Reflo::dump_flo(std::ostream &os,
-                     ZydisFormatter const &formatter,
-                     Flo const &flo)
-{
-    char buffer[256];
-    os << std::hex << std::setfill('0');
-    os << std::setw(8) << pe_.raw_to_virtual_address(flo.entry_point) << ":\n";
-    for (auto const &[address, instruction] : flo.get_disassembly()) {
-        auto va = pe_.raw_to_virtual_address(address);
-        dump_instruction(os, va, *instruction);
-    }
-    os << '\n';
 }
 
 #endif

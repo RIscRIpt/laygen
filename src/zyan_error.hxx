@@ -16,3 +16,11 @@ namespace rstc {
     };
 
 }
+
+#define ZYAN_THROW(expr)                     \
+    do {                                     \
+        ZyanStatus _status = (expr);         \
+        if (ZYAN_FAILED(_status)) {          \
+            throw rstc::zyan_error(_status); \
+        }                                    \
+    } while (0)

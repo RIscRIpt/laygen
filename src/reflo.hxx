@@ -25,13 +25,14 @@ namespace rstc {
 
 #ifndef NDEBUG
         void debug(std::ostream &os);
-        void dump_instruction(std::ostream &os,
-                              DWORD va,
-                              ZydisDecodedInstruction const &instruction);
-        void dump_flo(std::ostream &os,
-                      ZydisFormatter const &formatter,
-                      Flo const &flo);
 #endif
+
+        inline std::map<Address, std::unique_ptr<Flo>> const &get_flos() const
+        {
+            return flos_;
+        }
+
+        inline PE const &get_pe() const { return pe_; }
 
     private:
         Instruction decode_instruction(Address address, Address end);
@@ -51,9 +52,6 @@ namespace rstc {
         Address pop_unprocessed_flo();
 
         ZydisDecoder decoder_;
-#ifndef NDEBUG
-        ZydisFormatter formatter_;
-#endif
 
         PE pe_;
 
