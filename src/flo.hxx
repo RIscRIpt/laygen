@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core.hxx"
 #include "pe.hxx"
 
 #include <Zydis/Zydis.h>
@@ -10,9 +11,6 @@
 #include <optional>
 
 namespace rstc {
-
-    using Address = BYTE const *;
-    using Instruction = std::unique_ptr<ZydisDecodedInstruction>;
 
     struct Jump {
         enum Type {

@@ -36,7 +36,7 @@ PE::PE(std::filesystem::path const &path)
     }
 }
 
-BYTE const *PE::data() const
+Byte const *PE::data() const
 {
     return bytes_.data();
 }
@@ -58,7 +58,7 @@ IMAGE_SECTION_HEADER const *PE::image_first_section() const
 }
 
 IMAGE_SECTION_HEADER const *
-PE::get_section_by_raw_address(BYTE const *pointer) const
+PE::get_section_by_raw_address(Byte const *pointer) const
 {
     auto psection = std::upper_bound(
         sections_by_raw_data_.begin(),
@@ -114,7 +114,7 @@ RUNTIME_FUNCTION const *PE::get_runtime_function(DWORD va) const
     return nullptr;
 }
 
-BYTE const *PE::virtual_to_raw_address(DWORD va) const
+Byte const *PE::virtual_to_raw_address(DWORD va) const
 {
     auto psection =
         std::upper_bound(sections_by_va_.begin(),
@@ -130,26 +130,26 @@ BYTE const *PE::virtual_to_raw_address(DWORD va) const
     return data() + section->PointerToRawData + va - section->VirtualAddress;
 }
 
-DWORD PE::raw_to_virtual_address(BYTE const *pointer) const
+DWORD PE::raw_to_virtual_address(Byte const *pointer) const
 {
     auto raw_address = static_cast<DWORD>(pointer - data());
     auto section = get_section_by_raw_address(pointer);
     return raw_address - section->PointerToRawData + section->VirtualAddress;
 }
 
-BYTE const *PE::get_entry_point() const
+Byte const *PE::get_entry_point() const
 {
     return virtual_to_raw_address(
         image_optional_header64()->AddressOfEntryPoint);
 }
 
-BYTE const *PE::get_begin(BYTE const *pointer) const
+Byte const *PE::get_begin(Byte const *pointer) const
 {
     auto section = get_section_by_raw_address(pointer);
     return data() + section->PointerToRawData;
 }
 
-BYTE const *PE::get_end(BYTE const *pointer) const
+Byte const *PE::get_end(Byte const *pointer) const
 {
     auto section = get_section_by_raw_address(pointer);
     return data() + section->PointerToRawData + section->SizeOfRawData;

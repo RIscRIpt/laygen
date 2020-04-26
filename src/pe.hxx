@@ -34,7 +34,7 @@ namespace rstc {
 
         PE(std::filesystem::path const &path);
 
-        BYTE const *data() const;
+        Byte const *data() const;
         IMAGE_DOS_HEADER const *image_dos_header() const;
         IMAGE_FILE_HEADER const *image_file_header() const;
         IMAGE_OPTIONAL_HEADER64 const *image_optional_header64() const;
@@ -42,19 +42,19 @@ namespace rstc {
         RuntimeFunctions runtime_functions() const;
         RUNTIME_FUNCTION const *get_runtime_function(DWORD va) const;
 
-        BYTE const *virtual_to_raw_address(DWORD va) const;
-        DWORD raw_to_virtual_address(BYTE const *pointer) const;
+        Byte const *virtual_to_raw_address(DWORD va) const;
+        DWORD raw_to_virtual_address(Byte const *pointer) const;
 
-        BYTE const *get_entry_point() const;
+        Byte const *get_entry_point() const;
 
-        BYTE const *get_begin(BYTE const *pointer) const;
-        BYTE const *get_end(BYTE const *pointer) const;
+        Byte const *get_begin(Byte const *pointer) const;
+        Byte const *get_end(Byte const *pointer) const;
 
     private:
         IMAGE_NT_HEADERS const *image_nt_headers() const;
         IMAGE_SECTION_HEADER const *image_first_section() const;
         IMAGE_SECTION_HEADER const *
-        get_section_by_raw_address(BYTE const *pointer) const;
+        get_section_by_raw_address(Byte const *pointer) const;
 
         Bytes bytes_;
         std::vector<IMAGE_SECTION_HEADER const *> sections_by_va_;
