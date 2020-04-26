@@ -7,10 +7,8 @@ Flo::Flo(Address entry_point)
 {
 }
 
-Flo::AnalysisResult Flo::analyze(PE &pe,
-                                 Address address,
-                                 Instruction instr,
-                                 std::optional<Address> flo_end)
+Flo::AnalysisResult
+Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
 {
     auto result = disassembly.emplace(address, std::move(instr));
     auto const &instruction = *result.first->second;

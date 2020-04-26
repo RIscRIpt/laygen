@@ -63,7 +63,7 @@ void Reflo::fill_flo(Flo &flo)
                          instruction);
 #endif
         auto analysis_result =
-            flo.analyze(pe_, address, std::move(instruction), real_end_address);
+            flo.analyze(address, std::move(instruction), real_end_address);
         if (analysis_result.status != Flo::Next && !real_end_address) {
             break;
         }
@@ -90,8 +90,7 @@ void Reflo::post_fill_flo(Flo &flo)
                              pe_.raw_to_virtual_address(address),
                              instruction);
 #endif
-            auto analysis_result =
-                flo.analyze(pe_, address, std::move(instruction));
+            auto analysis_result = flo.analyze(address, std::move(instruction));
             if (analysis_result.status != Flo::Next) {
                 break;
             }

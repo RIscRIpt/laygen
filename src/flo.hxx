@@ -71,8 +71,7 @@ namespace rstc {
 
         Flo(Address entry_point = nullptr);
 
-        AnalysisResult analyze(PE &pe,
-                               Address address,
+        AnalysisResult analyze(Address address,
                                Instruction instr,
                                std::optional<Address> flo_end = std::nullopt);
         Address get_unanalized_inner_jump_dst() const;
