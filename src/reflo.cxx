@@ -25,6 +25,15 @@ Reflo::Reflo(std::filesystem::path const &pe_path)
                                 ZYDIS_ADDRESS_WIDTH_64));
 }
 
+Flo const *Reflo::get_flo_by_address(Address address) const
+{
+    auto it = std::prev(flos_.upper_bound(address));
+    if (it == flos_.end()) {
+        return nullptr;
+    }
+    return it->second.get();
+}
+
 Instruction Reflo::decode_instruction(Address address, Address end)
 {
     Instruction instruction = std::make_unique<ZydisDecodedInstruction>();
@@ -107,7 +116,7 @@ void Reflo::wait_before_analysis_run()
     ++analyzing_threads_count_;
 }
 
-void Reflo::run_flo_analysis(Address entry_point)
+void Reflo::run_flo_analysis(Address entry_point, Contexts contexts)
 {
     // Prevent recursive analysis
     if (created_flos_.contains(entry_point)) {
@@ -115,35 +124,38 @@ void Reflo::run_flo_analysis(Address entry_point)
     }
     created_flos_.emplace(entry_point);
     wait_before_analysis_run();
-    analyzing_threads_.emplace_back([this, entry_point]() mutable {
-        try {
-            ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
-                --analyzing_threads_count_;
-                flos_cv_.notify_all();
-            });
+    analyzing_threads_.emplace_back(
+        [this, entry_point, contexts = std::move(contexts)]() mutable {
+            try {
+                ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
+                    --analyzing_threads_count_;
+                    flos_cv_.notify_all();
+                });
 
 #ifdef DEBUG_ANALYSIS
-            std::clog << "Analyzing: " << std::hex << std::setfill('0')
-                      << std::setw(8) << pe_.raw_to_virtual_address(entry_point)
-                      << '\n';
+                std::clog << "Analyzing: " << std::hex << std::setfill('0')
+                          << std::setw(8)
+                          << pe_.raw_to_virtual_address(entry_point) << '\n';
 #endif
 
-            auto flo = std::make_unique<Flo>(entry_point);
-            fill_flo(*flo);
+                auto flo =
+                    std::make_unique<Flo>(entry_point, std::move(contexts));
+                fill_flo(*flo);
 
-            {
-                std::lock_guard<std::mutex> adding_flo_guard(flos_mutex_);
-                flos_.emplace(entry_point, std::move(flo));
-                unprocessed_flos_.push_back(entry_point);
+                {
+                    std::lock_guard<std::mutex> adding_flo_guard(flos_mutex_);
+                    flos_.emplace(entry_point, std::move(flo));
+                    unprocessed_flos_.push_back(entry_point);
+                }
             }
-        }
-        catch (zyan_error const &e) {
-            std::cerr << std::hex << std::setfill('0')
-                      << "Failed to analyze flo " << std::setw(8)
-                      << pe_.raw_to_virtual_address(entry_point) << ", error:\n"
-                      << e.what() << '\n';
-        }
-    });
+            catch (zyan_error const &e) {
+                std::cerr << std::hex << std::setfill('0')
+                          << "Failed to analyze flo " << std::setw(8)
+                          << pe_.raw_to_virtual_address(entry_point)
+                          << ", error:\n"
+                          << e.what() << '\n';
+            }
+        });
 }
 
 void Reflo::run_flo_post_analysis(Flo &flo)
@@ -177,7 +189,7 @@ Address Reflo::pop_unprocessed_flo()
 
 void Reflo::find_and_analyze_flos()
 {
-    run_flo_analysis(pe_.get_entry_point());
+    run_flo_analysis(pe_.get_entry_point(), std::move(make_initial_contexts()));
     while (true) {
         if (unprocessed_flos_.empty()) {
             // Wait for all analyzing threads
@@ -194,8 +206,11 @@ void Reflo::find_and_analyze_flos()
         for (auto it = flo->get_calls().begin(), end = flo->get_calls().end();
              it != end;
              it = flo->get_calls().upper_bound(it->first)) {
-            auto const &jump = it->second;
-            run_flo_analysis(jump.dst);
+            auto const &call = it->second;
+            auto const &ctx_instr = flo->get_disassembly().at(call.src);
+            run_flo_analysis(
+                call.dst,
+                std::move(flo->get_flatten_contexts_for_call(call.src)));
         }
 
         // Iterate over unique outer jumps
@@ -204,7 +219,9 @@ void Reflo::find_and_analyze_flos()
              it != end;
              it = flo->get_outer_jumps().upper_bound(it->first)) {
             auto const &jump = it->second;
-            run_flo_analysis(jump.dst);
+            run_flo_analysis(
+                jump.dst,
+                std::move(flo->get_flatten_contexts_for_jump(jump.src)));
         }
     }
     wait_for_analysis();
@@ -277,6 +294,23 @@ bool Reflo::unknown_jumps_exist() const
 void Reflo::set_max_analyzing_threads(size_t amount)
 {
     max_analyzing_threads_ = amount;
+}
+
+Contexts Reflo::make_initial_contexts()
+{
+    auto c = std::make_unique<Context>(nullptr);
+    auto ep = pe_.get_entry_point();
+    c->set_all_registers_zero(ep);
+    c->set(ZYDIS_REGISTER_RAX, pe_.raw_to_virtual_address(ep), ep);
+    c->set(ZYDIS_REGISTER_RDX, c->get(ZYDIS_REGISTER_RAX).first);
+    c->set(ZYDIS_REGISTER_RBP, 0x8000000000000000, ep);
+    c->set(ZYDIS_REGISTER_RSP, 0x8000000000000000, ep);
+    c->set(ZYDIS_REGISTER_R8, c->get(ZYDIS_REGISTER_RCX).first);
+    c->set(ZYDIS_REGISTER_R9, c->get(ZYDIS_REGISTER_RAX).first);
+    c->set(ZYDIS_REGISTER_RFLAGS, 0x244, ep);
+    Contexts cs;
+    cs.emplace_back(std::move(c));
+    return std::move(cs);
 }
 
 #ifndef NDEBUG

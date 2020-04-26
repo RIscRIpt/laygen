@@ -15,8 +15,8 @@ int wmain(int argc, wchar_t *argv[])
         rstc::Reflo reflo(argv[1]);
 #ifdef NDEBUG
         reflo.set_max_analyzing_threads(128);
-        reflo.analyze();
-        restruc.analyze(reflo);
+        reflo.();
+        restruc.(reflo);
 #else
         reflo.set_max_analyzing_threads(128);
         //reflo.debug(std::cout);

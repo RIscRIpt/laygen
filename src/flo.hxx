@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core.hxx"
+
+#include "context.hxx"
 #include "pe.hxx"
 
 #include <Zydis/Zydis.h>
@@ -46,7 +48,12 @@ namespace rstc {
     // Destination -> Call
     using Calls = std::multimap<Address, Call>;
 
-    using Disassembly = std::map<Address, Instruction>;
+    struct ContextedInstruction {
+        Instruction instruction;
+        Contexts contexts;
+    };
+
+    using Disassembly = std::map<Address, ContextedInstruction>;
 
     class Flo {
     public:
@@ -69,7 +76,7 @@ namespace rstc {
             Address const next_address;
         };
 
-        Flo(Address entry_point = nullptr);
+        Flo(Address entry_point = nullptr, Contexts context = {});
 
         AnalysisResult analyze(Address address,
                                Instruction instr,
@@ -79,6 +86,9 @@ namespace rstc {
         void
         promote_unknown_jumps(Jump::Type type,
                               std::function<bool(Address)> predicate = nullptr);
+
+        Contexts get_flatten_contexts_for_call(Address src) const;
+        Contexts get_flatten_contexts_for_jump(Address src) const;
 
         inline Disassembly const &get_disassembly() const
         {
@@ -92,6 +102,8 @@ namespace rstc {
         Address const entry_point;
 
     private:
+        Contexts get_contexts(Address address) const;
+
         bool is_inside(Address address,
                        std::optional<Address> flo_end = std::nullopt) const;
         Jump::Type
@@ -113,6 +125,10 @@ namespace rstc {
 
         static bool is_conditional_jump(ZydisMnemonic mnemonic);
 
+        static void emulate(Address address,
+                            ZydisDecodedInstruction const &instruction,
+                            ContextPtr &context);
+
         Disassembly disassembly;
         Jumps inner_jumps;
         Jumps outer_jumps;
@@ -120,6 +136,9 @@ namespace rstc {
         Calls calls;
         int stack_depth = 0;
         bool stack_was_modified = false;
+
+        // Will be nullptr after first instruction is added to disassembly
+        Contexts mutable initial_contexts;
     };
 
 }

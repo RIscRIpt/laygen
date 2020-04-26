@@ -2,16 +2,20 @@
 
 using namespace rstc;
 
-Flo::Flo(Address entry_point)
+Flo::Flo(Address entry_point, Contexts context)
     : entry_point(entry_point)
+    , initial_contexts(std::move(context))
 {
 }
 
 Flo::AnalysisResult
 Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
 {
-    auto result = disassembly.emplace(address, std::move(instr));
-    auto const &instruction = *result.first->second;
+    auto result = disassembly.emplace(
+        address,
+        ContextedInstruction{ std::move(instr),
+                              std::move(get_contexts(address)) });
+    auto const &instruction = *result.first->second.instruction;
     Address next_address = address + instruction.length;
     visit(address);
     if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL) {
@@ -91,6 +95,45 @@ Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
         }
     }
     return { Next, next_address };
+}
+
+Contexts Flo::get_contexts(Address address) const
+{
+    if (disassembly.empty()) {
+        return std::move(initial_contexts);
+    }
+    auto it = std::prev(disassembly.upper_bound(address));
+    auto instr_address = it->first;
+    auto const &instr = it->second.instruction;
+    auto const &contexts = it->second.contexts;
+    Contexts new_contexts;
+    std::transform(contexts.begin(),
+                   contexts.end(),
+                   std::back_inserter(new_contexts),
+                   std::bind(&Context::make_child, std::placeholders::_1));
+    std::for_each(
+        new_contexts.begin(),
+        new_contexts.end(),
+        std::bind(&Flo::emulate, instr_address, *instr, std::placeholders::_1));
+    return std::move(new_contexts);
+}
+
+void Flo::emulate(Address address,
+                  ZydisDecodedInstruction const &instruction,
+                  ContextPtr &context)
+{
+    for (size_t i = 0; i < instruction.operand_count; i++) {
+        auto const &op = instruction.operands[i];
+        if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_WRITE)) {
+            continue;
+        }
+        switch (op.type) {
+        case ZYDIS_OPERAND_TYPE_REGISTER:
+            context->set(op.reg.value, 0, address);
+            break;
+        case ZYDIS_OPERAND_TYPE_MEMORY: break;
+        }
+    }
 }
 
 bool Flo::is_conditional_jump(ZydisMnemonic mnemonic)
@@ -195,6 +238,23 @@ void rstc::Flo::promote_unknown_jumps(Jump::Type type,
             ++ijump;
         }
     }
+}
+
+Contexts rstc::Flo::get_flatten_contexts_for_call(Address src) const
+{
+    // TODO: modify RSP
+    return std::move(get_flatten_contexts_for_jump(src));
+}
+
+Contexts rstc::Flo::get_flatten_contexts_for_jump(Address src) const
+{
+    auto const &contexts = disassembly.at(src).contexts;
+    Contexts new_contexts;
+    std::transform(contexts.begin(),
+                   contexts.end(),
+                   std::back_inserter(new_contexts),
+                   std::bind(&Context::get_flatten, std::placeholders::_1));
+    return std::move(new_contexts);
 }
 
 void Flo::add_jump(Jump::Type type, Address dst, Address src)

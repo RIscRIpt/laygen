@@ -3,33 +3,27 @@
 #include "core.hxx"
 #include "virtual_memory.hxx"
 
+#include <Zydis/Zydis.h>
+
+#include <immintrin.h>
+
+#include <list>
 #include <unordered_map>
+#include <unordered_set>
+#include <variant>
 
 namespace rstc {
 
-    enum class Register : char {
-        RAX,
-        RBX,
-        RCX,
-        RDX,
-        RBP,
-        RSP,
-        RDI,
-        RSI,
-        R8,
-        R9,
-        R10,
-        R11,
-        R12,
-        R13,
-        R14,
-        R15,
-    };
+    class Context;
+    using ContextPtr = std::unique_ptr<Context>;
+    using Contexts = std::list<ContextPtr>;
 
     class Context {
     public:
-        struct RegisterValue {
-            uintptr_t value;
+        using RegisterValue = std::variant<uintptr_t, __m64, __m512>;
+
+        struct RegisterValueSource {
+            RegisterValue value;
             Address source;
         };
 
@@ -37,18 +31,27 @@ namespace rstc {
 
         Context const *const parent;
 
-        std::pair<RegisterValue, Context const *> get(Register reg) const;
+        std::pair<RegisterValueSource, Context const *> get(ZydisRegister reg) const;
         VirtualMemory::MemoryWithSources get(uintptr_t address,
                                              size_t size) const;
 
-        void set(Register reg, RegisterValue regval);
-        void set(Register reg, uintptr_t value, Address source);
+        void set(ZydisRegister reg, RegisterValue value, Address source);
+        void set(ZydisRegister reg, RegisterValueSource regval);
         void set(uintptr_t address, std::vector<Byte> memory, Address source);
 
-        std::unique_ptr<Context> get_flatten() const;
+        void set_all_registers_zero(Address source);
+
+        ContextPtr get_flatten() const;
+        ContextPtr make_child() const;
+
+        inline std::unordered_map<ZydisRegister, RegisterValueSource> const &
+        get_changed_registers()
+        {
+            return changed_registers_;
+        }
 
     private:
-        std::unordered_map<Register, RegisterValue> changed_registers_;
+        std::unordered_map<ZydisRegister, RegisterValueSource> changed_registers_;
         VirtualMemory changed_memory_;
     };
 
