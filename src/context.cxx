@@ -155,52 +155,51 @@ static const std::unordered_map<ZydisRegister, ZydisRegister>
         { ZYDIS_REGISTER_YMM31, ZYDIS_REGISTER_ZMM31 },
     };
 
+Context::Context(Address source)
+    : memory_(source)
+{
+    set_all_registers_zero(source);
+}
+
 Context::Context(Context const *parent)
     : parent(parent)
+    , memory_(parent->memory_.get_root_source())
 {
 }
 
-std::pair<Context::RegisterValueSource, Context const *>
-Context::get(ZydisRegister reg) const
+Context::ValueSource Context::get(ZydisRegister reg) const
 {
     Context const *c = this;
     do {
-        if (auto it = c->changed_registers_.find(reg);
-            it != c->changed_registers_.end()) {
-            return { it->second, c };
+        if (auto it = c->registers_.find(reg); it != c->registers_.end()) {
+            return it->second;
         }
         c = c->parent;
     } while (c);
     return { {}, nullptr };
 }
 
-VirtualMemory::MemoryWithSources Context::get(uintptr_t address,
-                                              size_t size) const
+VirtualMemory::Sources Context::get(uintptr_t address, size_t size) const
 {
-    if (parent != nullptr) {
+    if (!flatten) {
         throw std::runtime_error(
             "Context::get for memory works only with flattened Context");
     }
-    return changed_memory_.get(address, size);
+    return memory_.get(address, size);
 }
 
-void Context::set(ZydisRegister reg, RegisterValue value, Address source)
+void Context::set(ZydisRegister reg, Address source, Value value)
 {
-    set(reg, RegisterValueSource{ value, source });
+    set(reg, ValueSource{ value, source });
 }
 
-void Context::set(ZydisRegister reg, RegisterValueSource regvalsrc)
+void Context::set(ZydisRegister reg, ValueSource valsrc)
 {
     if (auto it = REGISTER_PROMOTION_MAP.find(reg);
         it != REGISTER_PROMOTION_MAP.end()) {
         reg = it->second;
     }
-    changed_registers_.insert_or_assign(reg, regvalsrc);
-}
-
-void Context::set(uintptr_t address, std::vector<Byte> memory, Address source)
-{
-    changed_memory_.assign(address, std::move(memory), source);
+    registers_.insert_or_assign(reg, valsrc);
 }
 
 void Context::set_all_registers_zero(Address source)
@@ -210,13 +209,34 @@ void Context::set_all_registers_zero(Address source)
     }
 }
 
+void Context::set(uintptr_t address, size_t size, Address source)
+{
+    memory_.assign(address, size, source);
+}
+
 ContextPtr Context::get_flatten() const
 {
     auto flatten = std::make_unique<Context>(this);
     for (auto reg : REGISTERS) {
-        flatten->set(reg, get(reg).first);
+        flatten->set(reg, get(reg));
     }
-    // TODO: flatten changed_memory_
+    std::vector<Context const *> context_path;
+    context_path.push_back(parent);
+    while (true) {
+        if (auto base_context = context_path.back();
+            !base_context->flatten && base_context->parent) {
+            context_path.push_back(base_context->parent);
+        }
+        else {
+            break;
+        }
+    }
+    for (auto it = context_path.rbegin(); it != context_path.rend(); ++it) {
+        for (auto const &m : (*it)->memory_.get_all()) {
+            flatten->set(m.start, m.end - m.start, m.source);
+        }
+    }
+    flatten->flatten = true;
     return std::move(flatten);
 }
 

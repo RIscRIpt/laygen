@@ -5,12 +5,9 @@
 
 #include <Zydis/Zydis.h>
 
-#include <immintrin.h>
-
-#include <list>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
-#include <variant>
 
 namespace rstc {
 
@@ -20,39 +17,39 @@ namespace rstc {
 
     class Context {
     public:
-        using RegisterValue = std::variant<uintptr_t, __m64, __m512>;
-
-        struct RegisterValueSource {
-            RegisterValue value;
+        using Value = std::optional<uintptr_t>;
+        struct ValueSource {
+            Value value;
             Address source;
         };
 
+        Context(Address source);
         Context(Context const *parent);
 
-        Context const *const parent;
+        Context const *const parent = nullptr;
 
-        std::pair<RegisterValueSource, Context const *> get(ZydisRegister reg) const;
-        VirtualMemory::MemoryWithSources get(uintptr_t address,
-                                             size_t size) const;
+        ValueSource get(ZydisRegister reg) const;
+        VirtualMemory::Sources get(uintptr_t address, size_t size) const;
 
-        void set(ZydisRegister reg, RegisterValue value, Address source);
-        void set(ZydisRegister reg, RegisterValueSource regval);
-        void set(uintptr_t address, std::vector<Byte> memory, Address source);
-
-        void set_all_registers_zero(Address source);
+        void set(ZydisRegister reg, Address source, Value value = std::nullopt);
+        void set(uintptr_t address, size_t size, Address source);
 
         ContextPtr get_flatten() const;
         ContextPtr make_child() const;
 
-        inline std::unordered_map<ZydisRegister, RegisterValueSource> const &
+        inline std::unordered_map<ZydisRegister, ValueSource> const &
         get_changed_registers()
         {
-            return changed_registers_;
+            return registers_;
         }
 
     private:
-        std::unordered_map<ZydisRegister, RegisterValueSource> changed_registers_;
-        VirtualMemory changed_memory_;
+        void set(ZydisRegister reg, ValueSource valsrc);
+        void set_all_registers_zero(Address source);
+
+        bool flatten = false;
+        std::unordered_map<ZydisRegister, ValueSource> registers_;
+        VirtualMemory memory_;
     };
 
 }

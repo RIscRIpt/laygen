@@ -11,40 +11,27 @@ namespace rstc {
     public:
         struct Source {
             Source() = default;
-            Source(uintptr_t start, uintptr_t end, Address source)
-                : start(start)
+            Source(Address source, uintptr_t start, uintptr_t end)
+                : source(source)
+                , start(start)
                 , end(end)
-                , source(source)
             {
             }
+            Address source = nullptr;
             uintptr_t start = 0;
             uintptr_t end = 0;
-            Address source = nullptr;
         };
+        using Sources = std::vector<Source>;
 
-        struct Memory {
-            size_t offset;
-            std::vector<Byte> memory;
-        };
+        VirtualMemory(Address source);
 
-        struct MemoryWithSources : Memory {
-            std::vector<Source> sources;
-        };
+        void assign(uintptr_t address, size_t size, Address source);
+        Sources get(uintptr_t address, size_t size) const;
+        Sources get_all() const;
 
-        VirtualMemory();
-
-        void
-        assign(uintptr_t address, std::vector<Byte> memory, Address source);
-        MemoryWithSources get(uintptr_t address, size_t size) const;
+        Address get_root_source() const;
 
     private:
-        void assign_memory(uintptr_t address, std::vector<Byte> memory);
-        void assign_source(uintptr_t address, size_t size, Address source);
-
-        Memory get_memory(uintptr_t address, size_t size) const;
-        std::vector<Source> get_sources(uintptr_t address, size_t size) const;
-
-        std::map<uintptr_t, std::vector<Byte>> memory_map_;
         std::map<uintptr_t, Address> source_map_;
     };
 

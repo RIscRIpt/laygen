@@ -42,7 +42,7 @@ namespace rstc {
         void fill_flo(Flo &flo);
         void post_fill_flo(Flo &flo);
         void wait_before_analysis_run();
-        void run_flo_analysis(Address entry_point, Contexts contexts);
+        void run_flo_analysis(Address entry_point);
         void run_flo_post_analysis(Flo &flo);
         void find_and_analyze_flos();
         void promote_jumps_to_outer();
@@ -52,8 +52,6 @@ namespace rstc {
         bool unknown_jumps_exist() const;
 
         Address pop_unprocessed_flo();
-
-        Contexts make_initial_contexts();
 
         ZydisDecoder decoder_;
 

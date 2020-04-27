@@ -13,11 +13,11 @@ void Dumper::dump_flo(std::ostream &os, Flo const &flo, DWORD entry_point_va)
     char buffer[256];
     os << std::hex << std::setfill('0');
     os << std::setw(8) << entry_point_va << ":\n";
-    for (auto const &[address, ctx_instr] : flo.get_disassembly()) {
+    for (auto const &[address, instr] : flo.get_disassembly()) {
         dump_instruction(os,
                          static_cast<DWORD>(address - flo.entry_point)
                              + entry_point_va,
-                         ctx_instr.instruction);
+                         instr);
     }
     os << '\n';
 }
