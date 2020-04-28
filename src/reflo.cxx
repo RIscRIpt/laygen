@@ -61,10 +61,7 @@ void Reflo::fill_flo(Flo &flo)
         end = pe_.virtual_to_raw_address(runtime_function->EndAddress);
         real_end_address = end;
     }
-    while (true) {
-        if (address == nullptr || address >= end) {
-            break;
-        }
+    while (address != nullptr && address < end) {
         auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_ANALYSIS
         dump_instruction(std::clog,
@@ -73,7 +70,7 @@ void Reflo::fill_flo(Flo &flo)
 #endif
         auto analysis_result =
             flo.analyze(address, std::move(instruction), real_end_address);
-        if (analysis_result.status != Flo::Next && !real_end_address) {
+        if (!(analysis_result.status & Flo::Next) && !real_end_address) {
             break;
         }
         address = analysis_result.next_address;
@@ -89,10 +86,7 @@ void Reflo::post_fill_flo(Flo &flo)
     assert(!runtime_function);
     while (auto address = flo.get_unanalized_inner_jump_dst()) {
         auto end = pe_.get_end(address);
-        while (true) {
-            if (address == nullptr || address >= end) {
-                break;
-            }
+        while (address != nullptr && address < end) {
             auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_ANALYSIS
             dump_instruction(std::clog,
@@ -100,7 +94,7 @@ void Reflo::post_fill_flo(Flo &flo)
                              instruction);
 #endif
             auto analysis_result = flo.analyze(address, std::move(instruction));
-            if (analysis_result.status != Flo::Next) {
+            if (!(analysis_result.status & Flo::Next)) {
                 break;
             }
             address = analysis_result.next_address;

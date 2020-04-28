@@ -60,7 +60,7 @@ Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
                                  flo_end);
             add_jump(type, dst, address);
         }
-        else {
+        else if (unconditional) {
             return { UnknownJump, next_address };
         }
         // TODO: Support more op.type-s.
@@ -77,10 +77,8 @@ Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
                 }
                 break;
             case Jump::Outer:
-                if (!is_inside(next_address)) {
-                    return { OuterJump, next_address };
-                }
-                break;
+                assert(!is_inside(next_address));
+                return { OuterJump, next_address };
             }
         }
     }
