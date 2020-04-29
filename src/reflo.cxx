@@ -25,7 +25,12 @@ Reflo::Reflo(std::filesystem::path const &pe_path)
                                 ZYDIS_ADDRESS_WIDTH_64));
 }
 
-Flo const *Reflo::get_flo_by_address(Address address) const
+Flo *Reflo::get_entry_flo()
+{
+    return get_flo_by_address(pe_.get_entry_point());
+}
+
+Flo *Reflo::get_flo_by_address(Address address)
 {
     if (flos_.empty()) {
         return nullptr;
@@ -61,7 +66,7 @@ void Reflo::fill_flo(Flo &flo)
         end = pe_.virtual_to_raw_address(runtime_function->EndAddress);
         real_end_address = end;
     }
-    while (address != nullptr && address < end) {
+    while (address && address < end) {
         auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_ANALYSIS
         dump_instruction(std::clog,
@@ -86,7 +91,7 @@ void Reflo::post_fill_flo(Flo &flo)
     assert(!runtime_function);
     while (auto address = flo.get_unanalized_inner_jump_dst()) {
         auto end = pe_.get_end(address);
-        while (address != nullptr && address < end) {
+        while (address && address < end) {
             auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_ANALYSIS
             dump_instruction(std::clog,

@@ -11,6 +11,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 
 namespace rstc {
 
@@ -83,17 +84,42 @@ namespace rstc {
         promote_unknown_jumps(Jump::Type type,
                               std::function<bool(Address)> predicate = nullptr);
 
-        Contexts get_flatten_contexts_for_call(Address src) const;
-        Contexts get_flatten_contexts_for_jump(Address src) const;
+        std::pair<ContextPtr, ZydisDecodedInstruction const *>
+        propagate_contexts(Address address, ContextPtr context);
+
+        ZydisDecodedInstruction const *get_instruction(Address address) const;
+
+        static Address
+        get_jump_destination(Address address,
+                             ZydisDecodedInstruction const &instruction);
+        static Address
+        get_jump_destination(PE const &pe,
+                             Address address,
+                             ZydisDecodedInstruction const &instruction,
+                             Context const &context);
+        static Address
+        get_call_destination(Address address,
+                             ZydisDecodedInstruction const &instruction);
+        static std::pair<Context::Value, size_t>
+        get_memory_address(ZydisDecodedOperand const &op,
+                           Context const &context);
+
+        static bool is_conditional_jump(ZydisMnemonic mnemonic);
+
+        std::vector<Context const *> get_contexts(Address address) const;
+        inline std::multimap<Address, ContextPtr> const &get_contexts() const
+        {
+            return contexts_;
+        }
 
         inline Disassembly const &get_disassembly() const
         {
-            return disassembly;
+            return disassembly_;
         }
-        inline Jumps const &get_inner_jumps() const { return inner_jumps; }
-        inline Jumps const &get_outer_jumps() const { return outer_jumps; }
-        inline Jumps const &get_unknown_jumps() const { return unknown_jumps; }
-        inline Calls const &get_calls() const { return calls; }
+        inline Jumps const &get_inner_jumps() const { return inner_jumps_; }
+        inline Jumps const &get_outer_jumps() const { return outer_jumps_; }
+        inline Jumps const &get_unknown_jumps() const { return unknown_jumps_; }
+        inline Calls const &get_calls() const { return calls_; }
 
         Address const entry_point;
 
@@ -112,20 +138,23 @@ namespace rstc {
         void visit(Address address);
         bool promote_unknown_jumps(Address dst, Jump::Type new_type);
 
+        static void emulate(Address address,
+                            ZydisDecodedInstruction const &instruction,
+                            Context &context);
+
         bool stack_depth_is_ambiguous() const;
 
         void add_jump(Jump::Type type, Address dst, Address src);
         void add_call(Address dst, Address src, Address ret);
 
-        static bool is_conditional_jump(ZydisMnemonic mnemonic);
-
-        Disassembly disassembly;
-        Jumps inner_jumps;
-        Jumps outer_jumps;
-        Jumps unknown_jumps;
-        Calls calls;
-        int stack_depth = 0;
-        bool stack_was_modified = false;
+        Disassembly disassembly_;
+        std::multimap<Address, ContextPtr> contexts_;
+        Jumps inner_jumps_;
+        Jumps outer_jumps_;
+        Jumps unknown_jumps_;
+        Calls calls_;
+        int stack_depth_ = 0;
+        bool stack_depth_was_modified_ = false;
     };
 
 }

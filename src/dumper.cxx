@@ -8,7 +8,9 @@ Dumper::Dumper()
     ZYAN_THROW(ZydisFormatterInit(&formatter_, ZYDIS_FORMATTER_STYLE_INTEL));
 }
 
-void Dumper::dump_flo(std::ostream &os, Flo const &flo, DWORD entry_point_va)
+void Dumper::dump_flo(std::ostream &os,
+                      Flo const &flo,
+                      DWORD entry_point_va) const
 {
     char buffer[256];
     os << std::hex << std::setfill('0');
@@ -17,18 +19,18 @@ void Dumper::dump_flo(std::ostream &os, Flo const &flo, DWORD entry_point_va)
         dump_instruction(os,
                          static_cast<DWORD>(address - flo.entry_point)
                              + entry_point_va,
-                         instr);
+                         *instr);
     }
     os << '\n';
 }
 
 void Dumper::dump_instruction(std::ostream &os,
                               DWORD va,
-                              Instruction const &instruction)
+                              ZydisDecodedInstruction const &instruction) const
 {
     char buffer[256];
     ZYAN_THROW(ZydisFormatterFormatInstruction(&formatter_,
-                                               instruction.get(),
+                                               &instruction,
                                                buffer,
                                                sizeof(buffer),
                                                va));

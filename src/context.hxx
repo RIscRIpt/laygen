@@ -13,7 +13,6 @@ namespace rstc {
 
     class Context;
     using ContextPtr = std::unique_ptr<Context>;
-    using Contexts = std::list<ContextPtr>;
 
     class Context {
     public:
@@ -32,9 +31,10 @@ namespace rstc {
         VirtualMemory::Sources get(uintptr_t address, size_t size) const;
 
         void set(ZydisRegister reg, Address source, Value value = std::nullopt);
+        void set(ZydisRegister reg, ValueSource valsrc);
         void set(uintptr_t address, size_t size, Address source);
 
-        ContextPtr get_flatten() const;
+        ContextPtr make_flatten() const;
         ContextPtr make_child() const;
 
         inline std::unordered_map<ZydisRegister, ValueSource> const &
@@ -42,12 +42,11 @@ namespace rstc {
         {
             return registers_;
         }
-
+        
     private:
-        void set(ZydisRegister reg, ValueSource valsrc);
         void set_all_registers_zero(Address source);
 
-        bool flatten = false;
+        bool flatten;
         std::unordered_map<ZydisRegister, ValueSource> registers_;
         VirtualMemory memory_;
     };

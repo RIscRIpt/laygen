@@ -27,9 +27,10 @@ namespace rstc {
         void debug(std::ostream &os);
 #endif
 
-        Flo const *get_flo_by_address(Address address) const;
+        Flo *get_entry_flo();
+        Flo *get_flo_by_address(Address address);
 
-        inline std::map<Address, std::unique_ptr<Flo>> const &get_flos() const
+        inline std::map<Address, std::unique_ptr<Flo>> &get_flos()
         {
             return flos_;
         }

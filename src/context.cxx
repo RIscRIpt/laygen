@@ -1,5 +1,7 @@
 #include "context.hxx"
 
+#include <algorithm>
+#include <functional>
 #include <stdexcept>
 
 using namespace rstc;
@@ -156,13 +158,15 @@ static const std::unordered_map<ZydisRegister, ZydisRegister>
     };
 
 Context::Context(Address source)
-    : memory_(source)
+    : flatten(true)
+    , memory_(source)
 {
     set_all_registers_zero(source);
 }
 
 Context::Context(Context const *parent)
-    : parent(parent)
+    : flatten(false)
+    , parent(parent)
     , memory_(parent->memory_.get_root_source())
 {
 }
@@ -173,6 +177,9 @@ Context::ValueSource Context::get(ZydisRegister reg) const
     do {
         if (auto it = c->registers_.find(reg); it != c->registers_.end()) {
             return it->second;
+        }
+        if (c->flatten) {
+            break;
         }
         c = c->parent;
     } while (c);
@@ -205,7 +212,7 @@ void Context::set(ZydisRegister reg, ValueSource valsrc)
 void Context::set_all_registers_zero(Address source)
 {
     for (auto reg : REGISTERS) {
-        set(reg, 0, source);
+        set(reg, source, 0);
     }
 }
 
@@ -214,7 +221,7 @@ void Context::set(uintptr_t address, size_t size, Address source)
     memory_.assign(address, size, source);
 }
 
-ContextPtr Context::get_flatten() const
+ContextPtr Context::make_flatten() const
 {
     auto flatten = std::make_unique<Context>(this);
     for (auto reg : REGISTERS) {

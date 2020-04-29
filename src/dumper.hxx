@@ -12,10 +12,11 @@ namespace rstc {
     public:
         Dumper();
 
-        void dump_flo(std::ostream &os, Flo const &flo, DWORD entry_point_va);
+        void
+        dump_flo(std::ostream &os, Flo const &flo, DWORD entry_point_va) const;
         void dump_instruction(std::ostream &os,
                               DWORD va,
-                              Instruction const &instruction);
+                              ZydisDecodedInstruction const &instruction) const;
 
     private:
         ZydisFormatter formatter_;
