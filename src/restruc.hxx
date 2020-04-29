@@ -21,7 +21,8 @@ namespace rstc {
                                  Dumper const &dumper,
                                  Address address,
                                  ZydisDecodedInstruction const &instr,
-                                 std::vector<Context const *> const &contexts);
+                                 std::vector<Context const *> const &contexts,
+                                 std::unordered_set<Address> visited = {});
 #endif
 
         Reflo &reflo;

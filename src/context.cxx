@@ -171,6 +171,16 @@ Context::Context(Context const *parent)
 {
 }
 
+bool Context::registers_equal(Context const &other) const
+{
+    for (auto reg : REGISTERS) {
+        if (get(reg) != other.get(reg)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 Context::ValueSource Context::get(ZydisRegister reg) const
 {
     Context const *c = this;

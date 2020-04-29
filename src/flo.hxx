@@ -85,7 +85,7 @@ namespace rstc {
                               std::function<bool(Address)> predicate = nullptr);
 
         std::pair<ContextPtr, ZydisDecodedInstruction const *>
-        propagate_contexts(Address address, ContextPtr context);
+        propagate_context(Address address, ContextPtr context);
 
         ZydisDecodedInstruction const *get_instruction(Address address) const;
 

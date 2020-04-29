@@ -106,10 +106,10 @@ bool Flo::is_conditional_jump(ZydisMnemonic mnemonic)
 std::vector<Context const *> Flo::get_contexts(Address address) const
 {
     std::vector<Context const *> contexts;
-    auto range = contexts_.equal_range(address);
-    contexts.reserve(std::distance(range.first, range.second));
-    for (auto it = range.first; it != range.second; ++it) {
-        contexts.push_back(it->second.get());
+    auto range = in_range(contexts_.equal_range(address));
+    contexts.reserve(std::distance(range.begin(), range.end()));
+    for (auto const &context : range) {
+        contexts.push_back(context.second.get());
     }
     return std::move(contexts);
 }
@@ -184,16 +184,21 @@ void Flo::promote_unknown_jumps(Jump::Type type,
 }
 
 std::pair<ContextPtr, ZydisDecodedInstruction const *>
-Flo::propagate_contexts(Address address, ContextPtr context)
+Flo::propagate_context(Address address, ContextPtr context)
 {
-    auto it = disassembly_.find(address);
-    if (it == disassembly_.end()) {
+    auto it_instr = disassembly_.find(address);
+    if (it_instr == disassembly_.end()) {
         return { nullptr, nullptr };
     }
-    auto const &instr = *it->second;
+    for (auto const &ctx : in_range(contexts_.equal_range(address))) {
+        if (ctx.second->registers_equal(*context)) {
+            // Stop context propagation if contexts are equal
+            return { nullptr, nullptr };
+        }
+    }
+    auto const &instr = *it_instr->second;
     auto new_context = context->make_child();
     emulate(address, instr, *new_context);
-    // TODO: merge contexts if they are identical
     contexts_.emplace(address, std::move(context));
     return { std::move(new_context), &instr };
 }

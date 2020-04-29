@@ -20,12 +20,22 @@ namespace rstc {
         struct ValueSource {
             Value value;
             Address source;
+            inline bool operator==(ValueSource const& other) const
+            {
+                return value == other.value && source == other.source;
+            }
+            inline bool operator!=(ValueSource const& other) const
+            {
+                return !(*this == other);
+            }
         };
 
         Context(Address source);
         Context(Context const *parent);
 
         Context const *const parent = nullptr;
+
+        bool registers_equal(Context const &other) const;
 
         ValueSource get(ZydisRegister reg) const;
         VirtualMemory::Sources get(uintptr_t address, size_t size) const;

@@ -34,7 +34,7 @@ ContextPtr Restruc::propagate_context(PE const &pe,
     while (address && context && !visited.contains(address)) {
         visited.emplace(address);
         std::tie(context, instr) =
-            flo->propagate_contexts(address, std::move(context));
+            flo->propagate_context(address, std::move(context));
         if (!context || !instr) {
             break;
         }
@@ -127,17 +127,22 @@ void Restruc::dump_instruction_history(
     Dumper const &dumper,
     Address address,
     ZydisDecodedInstruction const &instr,
-    std::vector<Context const *> const &contexts)
+    std::vector<Context const *> const &contexts,
+    std::unordered_set<Address> visited)
 {
+    if (visited.contains(address)) {
+        return;
+    }
+    visited.emplace(address);
     dumper.dump_instruction(os,
                             reflo.get_pe().raw_to_virtual_address(address),
                             instr);
-    for (size_t i = 0; i < instr.operand_count; i++) {
-        auto const &op = instr.operands[i];
-        if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
-            continue;
-        }
-        for (auto context : contexts) {
+    for (auto context : contexts) {
+        for (size_t i = 0; i < instr.operand_count; i++) {
+            auto const &op = instr.operands[i];
+            if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
+                continue;
+            }
             switch (op.type) {
             case ZYDIS_OPERAND_TYPE_REGISTER:
                 if (auto changed = context->get(op.reg.value);
@@ -149,7 +154,8 @@ void Restruc::dump_instruction_history(
                             dumper,
                             changed.source,
                             *flo->get_disassembly().at(changed.source),
-                            flo->get_contexts(changed.source));
+                            flo->get_contexts(changed.source),
+                            visited);
                         os << "---\n";
                     }
                 }
