@@ -40,6 +40,19 @@ Flo *Reflo::get_flo_by_address(Address address)
     return it->second.get();
 }
 
+std::pair<Address, Address> Reflo::get_analyzed_bounds() const
+{
+    auto last = flos_.rbegin()->second->get_disassembly().rbegin();
+    return { flos_.begin()->first, last->first + last->second->length };
+}
+
+std::pair<DWORD, DWORD> Reflo::get_analyzed_va_bounds() const
+{
+    auto [first, last] = get_analyzed_bounds();
+    return { pe_.raw_to_virtual_address(first),
+             pe_.raw_to_virtual_address(last) };
+}
+
 Instruction Reflo::decode_instruction(Address address, Address end)
 {
     Instruction instruction = std::make_unique<ZydisDecodedInstruction>();
@@ -87,10 +100,9 @@ void Reflo::post_fill_flo(Flo &flo)
             auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_POST_ANALYSIS
             Dumper dumper;
-            dumper.dump_instruction(
-                std::clog,
-                pe_.raw_to_virtual_address(address),
-                *instruction);
+            dumper.dump_instruction(std::clog,
+                                    pe_.raw_to_virtual_address(address),
+                                    *instruction);
 #endif
             auto analysis_result = flo.analyze(address, std::move(instruction));
             if (!(analysis_result.status & Flo::Next)) {

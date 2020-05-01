@@ -74,6 +74,11 @@ namespace rstc {
             Address const next_address;
         };
 
+        struct ContextPropagationResult {
+            ContextPtrs new_contexts = {};
+            ZydisDecodedInstruction const *instruction = nullptr;
+        };
+
         Flo(Address entry_point = nullptr);
 
         AnalysisResult analyze(Address address,
@@ -85,19 +90,19 @@ namespace rstc {
         promote_unknown_jumps(Jump::Type type,
                               std::function<bool(Address)> predicate = nullptr);
 
-        std::pair<ContextPtr, ZydisDecodedInstruction const *>
-        propagate_context(Address address, ContextPtr context);
+        ContextPropagationResult propagate_contexts(Address address,
+                                                    ContextPtrs contexts);
 
         ZydisDecodedInstruction const *get_instruction(Address address) const;
 
         static Address
         get_jump_destination(Address address,
                              ZydisDecodedInstruction const &instruction);
-        static Address
-        get_jump_destination(PE const &pe,
-                             Address address,
-                             ZydisDecodedInstruction const &instruction,
-                             Context const &context);
+        static std::vector<Address>
+        get_jump_destinations(PE const &pe,
+                              Address address,
+                              ZydisDecodedInstruction const &instruction,
+                              ContextPtrs const &context);
         static Address
         get_call_destination(Address address,
                              ZydisDecodedInstruction const &instruction);

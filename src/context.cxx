@@ -158,17 +158,21 @@ static const std::unordered_map<ZydisRegister, ZydisRegister>
     };
 
 Context::Context(Address source)
-    : flatten(true)
+    : parent_(nullptr)
+    , flatten_(true)
     , memory_(source)
 {
     set_all_registers_zero(source);
 }
 
-Context::Context(Context const *parent)
-    : flatten(false)
-    , parent(parent)
+Context::Context(Context const *parent, bool flatten)
+    : parent_(parent)
+    , flatten_(false)
     , memory_(parent->memory_.get_root_source())
 {
+    if (flatten) {
+        flattenize();
+    }
 }
 
 bool Context::registers_equal(Context const &other) const
@@ -188,17 +192,17 @@ Context::ValueSource Context::get(ZydisRegister reg) const
         if (auto it = c->registers_.find(reg); it != c->registers_.end()) {
             return it->second;
         }
-        if (c->flatten) {
+        if (c->flatten_) {
             break;
         }
-        c = c->parent;
+        c = c->parent_;
     } while (c);
     return { {}, nullptr };
 }
 
 VirtualMemory::Sources Context::get(uintptr_t address, size_t size) const
 {
-    if (!flatten) {
+    if (!flatten_) {
         throw std::runtime_error(
             "Context::get for memory works only with flattened Context");
     }
@@ -231,18 +235,17 @@ void Context::set(uintptr_t address, size_t size, Address source)
     memory_.assign(address, size, source);
 }
 
-ContextPtr Context::make_flatten() const
+void Context::flattenize()
 {
-    auto flatten = std::make_unique<Context>(this);
     for (auto reg : REGISTERS) {
-        flatten->set(reg, get(reg));
+        set(reg, get(reg));
     }
     std::vector<Context const *> context_path;
-    context_path.push_back(parent);
+    context_path.push_back(parent_);
     while (true) {
         if (auto base_context = context_path.back();
-            !base_context->flatten && base_context->parent) {
-            context_path.push_back(base_context->parent);
+            !base_context->flatten_ && base_context->parent_) {
+            context_path.push_back(base_context->parent_);
         }
         else {
             break;
@@ -250,14 +253,19 @@ ContextPtr Context::make_flatten() const
     }
     for (auto it = context_path.rbegin(); it != context_path.rend(); ++it) {
         for (auto const &m : (*it)->memory_.get_all()) {
-            flatten->set(m.start, m.end - m.start, m.source);
+            set(m.start, m.end - m.start, m.source);
         }
     }
-    flatten->flatten = true;
-    return std::move(flatten);
+    parent_ = nullptr;
+    flatten_ = true;
 }
 
 ContextPtr Context::make_child() const
 {
     return std::make_unique<Context>(this);
+}
+
+ContextPtr Context::make_flatten_child() const
+{
+    return std::make_unique<Context>(this, true);
 }

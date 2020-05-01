@@ -31,9 +31,9 @@ Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_JMP
              || is_conditional_jump(instruction.mnemonic)) {
         bool unconditional = instruction.mnemonic == ZYDIS_MNEMONIC_JMP;
-        auto const &op = instruction.operands[0];
         Jump::Type type = Jump::Unknown;
-        if (auto dst = get_jump_destination(address, instruction); dst) {
+        auto dst = get_jump_destination(address, instruction);
+        if (dst) {
             type = get_jump_type(dst,
                                  address,
                                  next_address,
@@ -41,10 +41,6 @@ Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
                                  flo_end);
             add_jump(type, dst, address);
         }
-        else if (unconditional) {
-            return { UnknownJump, next_address };
-        }
-        // TODO: Support more op.type-s.
         if (unconditional) {
             switch (type) {
             case Jump::Unknown:
@@ -58,7 +54,7 @@ Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
                 }
                 break;
             case Jump::Outer:
-                assert(!is_inside(next_address));
+                assert(!is_inside(dst));
                 return { OuterJump, next_address };
             }
         }
@@ -187,24 +183,39 @@ void Flo::promote_unknown_jumps(Jump::Type type,
     }
 }
 
-std::pair<ContextPtr, ZydisDecodedInstruction const *>
-Flo::propagate_context(Address address, ContextPtr context)
+Flo::ContextPropagationResult Flo::propagate_contexts(Address address,
+                                                      ContextPtrs contexts)
 {
+    ContextPropagationResult result;
     auto it_instr = disassembly_.find(address);
     if (it_instr == disassembly_.end()) {
-        return { nullptr, nullptr };
+        return std::move(result);
     }
+    // Compare contexts with existing contexts, eliminating duplicates, and
+    // stopping if there are no new contexts
     for (auto const &[addr, ctx] : in_range(contexts_.equal_range(address))) {
-        if (ctx->registers_equal(*context)) {
-            // Stop context propagation if contexts are equal
-            return { nullptr, nullptr };
-        }
+        std::erase_if(contexts, [&ctx](ContextPtr const &context) {
+            return ctx->registers_equal(*context);
+        });
     }
-    auto const &instr = *it_instr->second;
-    auto new_context = context->make_child();
-    emulate(address, instr, *new_context);
-    contexts_.emplace(address, std::move(context));
-    return { std::move(new_context), &instr };
+    if (contexts.empty()) {
+        return std::move(result);
+    }
+    result.instruction = &*it_instr->second;
+    result.new_contexts.reserve(contexts.size());
+    std::transform(
+        contexts.begin(),
+        contexts.end(),
+        std::back_inserter(result.new_contexts),
+        [this, address, instr = result.instruction](ContextPtr const &context) {
+            auto new_context = context->make_child();
+            emulate(address, *instr, *new_context);
+            return new_context;
+        });
+    for (auto &&context : contexts) {
+        contexts_.emplace(address, std::move(context));
+    }
+    return std::move(result);
 }
 
 void Flo::emulate(Address address,
@@ -354,6 +365,7 @@ Address Flo::get_jump_destination(Address address,
            || is_conditional_jump(instruction.mnemonic));
     assert(instruction.operand_count > 0);
     auto const &op = instruction.operands[0];
+    // TODO: Support more op.type-s.
     switch (op.type) {
     case ZYDIS_OPERAND_TYPE_IMMEDIATE:
         return address + instruction.length + op.imm.value.s;
@@ -361,30 +373,38 @@ Address Flo::get_jump_destination(Address address,
     return nullptr;
 }
 
-Address Flo::get_jump_destination(PE const &pe,
-                                  Address address,
-                                  ZydisDecodedInstruction const &instruction,
-                                  Context const &context)
+std::vector<Address>
+Flo::get_jump_destinations(PE const &pe,
+                           Address address,
+                           ZydisDecodedInstruction const &instruction,
+                           ContextPtrs const &contexts)
 {
     assert(instruction.mnemonic == ZYDIS_MNEMONIC_JMP
            || is_conditional_jump(instruction.mnemonic));
     assert(instruction.operand_count > 0);
+    std::vector<Address> dsts;
     auto const &op = instruction.operands[0];
     switch (op.type) {
     case ZYDIS_OPERAND_TYPE_IMMEDIATE:
-        return address + instruction.length + op.imm.value.s;
+        dsts.push_back(address + instruction.length + op.imm.value.s);
     case ZYDIS_OPERAND_TYPE_REGISTER:
-        if (auto dst = context.get(op.reg.value).value; dst) {
-            return pe.virtual_to_raw_address(*dst);
+        dsts.reserve(contexts.size());
+        for (auto const &context : contexts) {
+            if (auto dst = context->get(op.reg.value).value; dst) {
+                dsts.push_back(pe.virtual_to_raw_address(*dst));
+            }
         }
         break;
     case ZYDIS_OPERAND_TYPE_MEMORY:
-        if (auto [value, size] = get_memory_address(op, context);
-            value.has_value()) {
-            return pe.virtual_to_raw_address(*value);
+        dsts.reserve(contexts.size());
+        for (auto const &context : contexts) {
+            if (auto [value, size] = get_memory_address(op, *context);
+                value.has_value()) {
+                dsts.push_back(pe.virtual_to_raw_address(*value));
+            }
         }
     }
-    return nullptr;
+    return std::move(dsts);
 }
 
 Address Flo::get_call_destination(Address address,

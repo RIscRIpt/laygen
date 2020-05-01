@@ -30,6 +30,9 @@ namespace rstc {
         Flo *get_entry_flo();
         Flo *get_flo_by_address(Address address);
 
+        std::pair<Address, Address> get_analyzed_bounds() const;
+        std::pair<DWORD, DWORD> get_analyzed_va_bounds() const;
+
         inline std::map<Address, std::unique_ptr<Flo>> &get_flos()
         {
             return flos_;
