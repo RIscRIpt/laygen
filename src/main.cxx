@@ -19,7 +19,6 @@ int wmain(int argc, wchar_t *argv[])
         restruc.analyze(reflo);
 #else
         reflo.set_max_analyzing_threads(128);
-        // reflo.debug(std::cout);
         std::cout << "Reflo::analyze ...\n";
         reflo.analyze();
         std::cout << "Restruc::analyze ...\n";

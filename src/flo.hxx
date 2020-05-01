@@ -56,6 +56,7 @@ namespace rstc {
         enum AnalysisStatus {
             Stop,
             Complete,
+            AlreadyAnalyzed,
             UnknownJump,
             Next = 0x8000000,
             InnerJump,

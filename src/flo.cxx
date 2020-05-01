@@ -10,8 +10,11 @@ Flo::Flo(Address entry_point)
 Flo::AnalysisResult
 Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
 {
-    auto result = disassembly_.emplace(address, std::move(instr));
-    auto const &instruction = *result.first->second;
+    auto [it, inserted] = disassembly_.emplace(address, std::move(instr));
+    if (!inserted) {
+        return { AlreadyAnalyzed, nullptr };
+    }
+    auto const &instruction = *it->second;
     Address next_address = address + instruction.length;
     visit(address);
     if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL) {
@@ -20,7 +23,8 @@ Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
         }
     }
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
-        if (!is_inside(next_address) && !flo_end) {
+        if (!flo_end && !is_inside(next_address)
+            && !promote_unknown_jumps(next_address, Jump::Inner)) {
             return { Complete, next_address };
         }
     }
@@ -108,8 +112,8 @@ std::vector<Context const *> Flo::get_contexts(Address address) const
     std::vector<Context const *> contexts;
     auto range = in_range(contexts_.equal_range(address));
     contexts.reserve(std::distance(range.begin(), range.end()));
-    for (auto const &context : range) {
-        contexts.push_back(context.second.get());
+    for (auto const &[addr, ctx] : range) {
+        contexts.push_back(ctx.get());
     }
     return std::move(contexts);
 }
@@ -190,8 +194,8 @@ Flo::propagate_context(Address address, ContextPtr context)
     if (it_instr == disassembly_.end()) {
         return { nullptr, nullptr };
     }
-    for (auto const &ctx : in_range(contexts_.equal_range(address))) {
-        if (ctx.second->registers_equal(*context)) {
+    for (auto const &[addr, ctx] : in_range(contexts_.equal_range(address))) {
+        if (ctx->registers_equal(*context)) {
             // Stop context propagation if contexts are equal
             return { nullptr, nullptr };
         }
@@ -218,9 +222,9 @@ void Flo::emulate(Address address,
             context.set(op.reg.value, address, context.get(op.reg.value).value);
             break;
         case ZYDIS_OPERAND_TYPE_MEMORY:
-            if (auto value_size = get_memory_address(op, context);
-                value_size.first.has_value()) {
-                context.set(*value_size.first, value_size.second, address);
+            if (auto [value, size] = get_memory_address(op, context);
+                value.has_value()) {
+                context.set(*value, size, address);
             }
             break;
         }
@@ -375,8 +379,9 @@ Address Flo::get_jump_destination(PE const &pe,
         }
         break;
     case ZYDIS_OPERAND_TYPE_MEMORY:
-        if (auto dst = get_memory_address(op, context); dst.first.has_value()) {
-            return pe.virtual_to_raw_address(*dst.first);
+        if (auto [value, size] = get_memory_address(op, context);
+            value.has_value()) {
+            return pe.virtual_to_raw_address(*value);
         }
     }
     return nullptr;

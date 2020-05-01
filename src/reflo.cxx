@@ -13,6 +13,7 @@
 #include <string>
 
 //#define DEBUG_ANALYSIS
+//#define DEBUG_POST_ANALYSIS
 
 using namespace rstc;
 
@@ -51,13 +52,7 @@ Instruction Reflo::decode_instruction(Address address, Address end)
 
 void Reflo::fill_flo(Flo &flo)
 {
-    Address address;
-    if (flo.get_disassembly().empty()) {
-        address = flo.entry_point;
-    }
-    else {
-        address = flo.get_disassembly().rbegin()->first;
-    }
+    Address address = flo.entry_point;
     Address end = pe_.get_end(address);
     std::optional<Address> real_end_address;
     auto runtime_function =
@@ -69,9 +64,10 @@ void Reflo::fill_flo(Flo &flo)
     while (address && address < end) {
         auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_ANALYSIS
-        dump_instruction(std::clog,
-                         pe_.raw_to_virtual_address(address),
-                         instruction);
+        Dumper dumper;
+        dumper.dump_instruction(std::clog,
+                                pe_.raw_to_virtual_address(address),
+                                *instruction);
 #endif
         auto analysis_result =
             flo.analyze(address, std::move(instruction), real_end_address);
@@ -80,23 +76,21 @@ void Reflo::fill_flo(Flo &flo)
         }
         address = analysis_result.next_address;
     }
+    post_fill_flo(flo);
 }
 
 void Reflo::post_fill_flo(Flo &flo)
 {
-    // Post fill/analysis cannot happen for functions with defined boundaries,
-    // which can be found in RUNTIME_FUNCTION.
-    auto runtime_function =
-        pe_.get_runtime_function(pe_.raw_to_virtual_address(flo.entry_point));
-    assert(!runtime_function);
     while (auto address = flo.get_unanalized_inner_jump_dst()) {
         auto end = pe_.get_end(address);
         while (address && address < end) {
             auto instruction = decode_instruction(address, end);
-#ifdef DEBUG_ANALYSIS
-            dump_instruction(std::clog,
-                             pe_.raw_to_virtual_address(address),
-                             instruction);
+#ifdef DEBUG_POST_ANALYSIS
+            Dumper dumper;
+            dumper.dump_instruction(
+                std::clog,
+                pe_.raw_to_virtual_address(address),
+                *instruction);
 #endif
             auto analysis_result = flo.analyze(address, std::move(instruction));
             if (!(analysis_result.status & Flo::Next)) {
@@ -163,6 +157,10 @@ void Reflo::run_flo_post_analysis(Flo &flo)
                 --analyzing_threads_count_;
                 flos_cv_.notify_all();
             });
+            // Post fill/analysis cannot happen for functions with defined
+            // boundaries, which can be found in RUNTIME_FUNCTION.
+            assert(!pe_.get_runtime_function(
+                pe_.raw_to_virtual_address(flo.entry_point)));
             post_fill_flo(flo);
         }
         catch (zyan_error const &e) {
@@ -289,14 +287,21 @@ void Reflo::set_max_analyzing_threads(size_t amount)
 
 #ifndef NDEBUG
 
-void Reflo::debug(std::ostream &os)
+void Reflo::debug(std::ostream &os, DWORD va)
 {
     Dumper dumper;
-    analyze();
-    for (auto const &f : flos_) {
-        dumper.dump_flo(os,
-                        *f.second,
-                        pe_.raw_to_virtual_address(f.second->entry_point));
+    run_flo_analysis(pe_.virtual_to_raw_address(va));
+    wait_for_analysis();
+    while (unknown_jumps_exist()) {
+        promote_jumps_to_outer();
+        // Tehnically, we can't promote unknown jumps to inner jumps, as
+        // we still haven't explored the program as a whole, and some flos
+        // (functions) might be unlisted yet.
+        promote_jumps_to_inner();
+        post_analyze_flos();
+    }
+    for (auto const &[addr, flo] : flos_) {
+        dumper.dump_flo(os, *flo, pe_.raw_to_virtual_address(flo->entry_point));
     }
 }
 

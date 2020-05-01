@@ -24,7 +24,7 @@ namespace rstc {
         void set_max_analyzing_threads(size_t amount);
 
 #ifndef NDEBUG
-        void debug(std::ostream &os);
+        void debug(std::ostream &os, DWORD va);
 #endif
 
         Flo *get_entry_flo();
