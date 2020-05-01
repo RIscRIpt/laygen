@@ -28,7 +28,7 @@ namespace rstc {
     private:
         ContextPtrs
         propagate_contexts(Address address,
-                           ContextPtrs context,
+                           ContextPtrs contexts,
                            std::unordered_multiset<Address> visited = {});
         ContextPtrs make_initial_contexts();
 

@@ -60,17 +60,17 @@ IMAGE_SECTION_HEADER const *PE::image_first_section() const
 IMAGE_SECTION_HEADER const *
 PE::get_section_by_raw_address(Byte const *pointer) const
 {
-    auto psection = std::upper_bound(
+    auto it = std::upper_bound(
         sections_by_raw_data_.begin(),
         sections_by_raw_data_.end(),
         static_cast<DWORD>(pointer - data()),
         [](DWORD raw_address, IMAGE_SECTION_HEADER const *section) {
             return raw_address < section->PointerToRawData;
         });
-    if (psection == sections_by_raw_data_.begin()) {
+    if (it == sections_by_raw_data_.begin()) {
         throw std::runtime_error("invalid raw address");
     }
-    return *(psection - 1);
+    return *std::prev(it);
 }
 
 IMAGE_FILE_HEADER const *PE::image_file_header() const
@@ -116,17 +116,17 @@ RUNTIME_FUNCTION const *PE::get_runtime_function(DWORD va) const
 
 Byte const *PE::virtual_to_raw_address(DWORD va) const
 {
-    auto psection =
+    auto it =
         std::upper_bound(sections_by_va_.begin(),
                          sections_by_va_.end(),
                          va,
                          [](DWORD va, IMAGE_SECTION_HEADER const *section) {
                              return va < section->VirtualAddress;
                          });
-    if (psection == sections_by_va_.begin()) {
-        throw std::runtime_error("failed to find entry point");
+    if (it == sections_by_va_.begin()) {
+        throw std::runtime_error("invalid virtual address");
     }
-    auto section = *(psection - 1);
+    auto section = *std::prev(it);
     return data() + section->PointerToRawData + va - section->VirtualAddress;
 }
 

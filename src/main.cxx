@@ -17,7 +17,7 @@ int wmain(int argc, wchar_t *argv[])
 #ifdef NDEBUG
         reflo.set_max_analyzing_threads(128);
         reflo.analyze();
-        restruc.analyze(reflo);
+        restruc.analyze();
 #else
         reflo.set_max_analyzing_threads(128);
         std::cout << "Reflo::analyze ...\n";
