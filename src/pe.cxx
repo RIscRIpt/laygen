@@ -100,6 +100,9 @@ PE::RuntimeFunctions PE::runtime_functions() const
     }
     RUNTIME_FUNCTION const *begin = reinterpret_cast<RUNTIME_FUNCTION const *>(
         virtual_to_raw_address(directory_exception.VirtualAddress));
+    if (!begin) {
+        return RuntimeFunctions(nullptr, nullptr);
+    }
     RUNTIME_FUNCTION const *end =
         begin + directory_exception.Size / sizeof(RUNTIME_FUNCTION);
     return RuntimeFunctions(begin, end);
@@ -124,7 +127,7 @@ Byte const *PE::virtual_to_raw_address(DWORD va) const
                              return va < section->VirtualAddress;
                          });
     if (it == sections_by_va_.begin()) {
-        throw std::runtime_error("invalid virtual address");
+        return nullptr;
     }
     auto section = *std::prev(it);
     return data() + section->PointerToRawData + va - section->VirtualAddress;

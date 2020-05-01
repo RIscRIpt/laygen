@@ -71,8 +71,12 @@ void Reflo::fill_flo(Flo &flo)
     auto runtime_function =
         pe_.get_runtime_function(pe_.raw_to_virtual_address(flo.entry_point));
     if (runtime_function && runtime_function->EndAddress) {
-        end = pe_.virtual_to_raw_address(runtime_function->EndAddress);
-        real_end_address = end;
+        if (auto real_end =
+                pe_.virtual_to_raw_address(runtime_function->EndAddress);
+            real_end) {
+            end = real_end;
+            real_end_address = end;
+        }
     }
     while (address && address < end) {
         auto instruction = decode_instruction(address, end);

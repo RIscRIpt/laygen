@@ -193,6 +193,7 @@ Flo::ContextPropagationResult Flo::propagate_contexts(Address address,
     }
     // Compare contexts with existing contexts, eliminating duplicates, and
     // stopping if there are no new contexts
+    // TODO: make this check only once per basic block
     for (auto const &[addr, ctx] : in_range(contexts_.equal_range(address))) {
         std::erase_if(contexts, [&ctx](ContextPtr const &context) {
             return ctx->registers_equal(*context);
@@ -390,17 +391,21 @@ Flo::get_jump_destinations(PE const &pe,
     case ZYDIS_OPERAND_TYPE_REGISTER:
         dsts.reserve(contexts.size());
         for (auto const &context : contexts) {
-            if (auto dst = context->get(op.reg.value).value; dst) {
-                dsts.push_back(pe.virtual_to_raw_address(*dst));
+            if (auto va_dst = context->get(op.reg.value).value; va_dst) {
+                if (auto dst = pe.virtual_to_raw_address(*va_dst); dst) {
+                    dsts.push_back(dst);
+                }
             }
         }
         break;
     case ZYDIS_OPERAND_TYPE_MEMORY:
         dsts.reserve(contexts.size());
         for (auto const &context : contexts) {
-            if (auto [value, size] = get_memory_address(op, *context);
-                value.has_value()) {
-                dsts.push_back(pe.virtual_to_raw_address(*value));
+            if (auto [va_dst, size] = get_memory_address(op, *context);
+                va_dst.has_value()) {
+                if (auto dst = pe.virtual_to_raw_address(*va_dst); dst) {
+                    dsts.push_back(dst);
+                }
             }
         }
     }
