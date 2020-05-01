@@ -59,6 +59,7 @@ namespace rstc {
 
         Context const *parent_;
         bool flatten_;
+        size_t registers_hash_;
         std::unordered_map<ZydisRegister, ValueSource> registers_;
         VirtualMemory memory_;
     };

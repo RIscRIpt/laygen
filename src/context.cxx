@@ -161,6 +161,7 @@ Context::Context(Address source)
     : parent_(nullptr)
     , flatten_(true)
     , memory_(source)
+    , registers_hash_(0)
 {
     set_all_registers_zero(source);
 }
@@ -169,6 +170,7 @@ Context::Context(Context const *parent, bool flatten)
     : parent_(parent)
     , flatten_(false)
     , memory_(parent->memory_.get_root_source())
+    , registers_hash_(parent->registers_hash_)
 {
     if (flatten) {
         flattenize();
@@ -177,6 +179,9 @@ Context::Context(Context const *parent, bool flatten)
 
 bool Context::registers_equal(Context const &other) const
 {
+    if (registers_hash_ != other.registers_hash_) {
+        return false;
+    }
     for (auto reg : REGISTERS) {
         if (get(reg) != other.get(reg)) {
             return false;
@@ -220,6 +225,9 @@ void Context::set(ZydisRegister reg, ValueSource valsrc)
         it != REGISTER_PROMOTION_MAP.end()) {
         reg = it->second;
     }
+    hash_combine(registers_hash_, reg);
+    hash_combine(registers_hash_, valsrc.value);
+    hash_combine(registers_hash_, valsrc.source);
     registers_.insert_or_assign(reg, valsrc);
 }
 
@@ -237,6 +245,7 @@ void Context::set(uintptr_t address, size_t size, Address source)
 
 void Context::flattenize()
 {
+    registers_hash_ = 0;
     for (auto reg : REGISTERS) {
         set(reg, get(reg));
     }
