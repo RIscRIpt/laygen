@@ -62,12 +62,12 @@ VirtualMemory::Sources VirtualMemory::get(uintptr_t address, size_t size) const
             ++source_next;
         }
     }
-    return std::move(sources);
+    return sources;
 }
 
 VirtualMemory::Sources VirtualMemory::get_all() const
 {
-    return std::move(get(0, source_map_.rbegin()->first));
+    return get(0, source_map_.rbegin()->first);
 }
 
 Address VirtualMemory::get_root_source() const

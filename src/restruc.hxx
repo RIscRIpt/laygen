@@ -26,21 +26,23 @@ namespace rstc {
 #endif
 
     private:
-        ContextPtrs
+        Contexts
         propagate_contexts(Address address,
-                           ContextPtrs contexts,
+                           Contexts contexts,
                            std::unordered_multiset<Address> visited = {});
-        ContextPtrs make_initial_contexts();
+        Contexts make_initial_contexts();
 
-        static ContextPtrs make_child_contexts(ContextPtrs const &parents);
-        static void set_contexts_return_value(ContextPtrs &contexts,
+        static void flatten_contexts(Contexts &contexts);
+        static Contexts make_child_contexts(Contexts const &parents);
+        static void merge_contexts(Contexts &dst, Contexts contexts);
+        static void set_contexts_return_value(Contexts &contexts,
                                               Address call_instr);
         static bool
         instruction_has_memory_access(ZydisDecodedInstruction const &instr);
         static bool operand_has_memory_access(ZydisDecodedOperand const &op);
 
-        PE const &pe_;
         Reflo &reflo_;
+        PE const &pe_;
         std::vector<std::thread> analyzing_threads_;
     };
 

@@ -119,7 +119,8 @@ void Reflo::post_fill_flo(Flo &flo)
 
 void Reflo::wait_before_analysis_run()
 {
-    flos_cv_.wait(std::unique_lock(flos_mutex_), [this] {
+    auto lock = std::unique_lock(flos_mutex_);
+    flos_cv_.wait(lock, [this] {
         return analyzing_threads_count_ < max_analyzing_threads_;
     });
     ++analyzing_threads_count_;
@@ -203,7 +204,8 @@ void Reflo::find_and_analyze_flos()
     while (true) {
         if (unprocessed_flos_.empty()) {
             // Wait for all analyzing threads
-            flos_cv_.wait(std::unique_lock(flos_mutex_),
+            auto lock = std::unique_lock(flos_mutex_);
+            flos_cv_.wait(lock,
                           [this] { return analyzing_threads_count_ == 0; });
         }
         if (analyzing_threads_count_ == 0 && unprocessed_flos_.empty()) {
@@ -291,7 +293,7 @@ void Reflo::wait_for_analysis()
 
 bool Reflo::unknown_jumps_exist() const
 {
-    return std::any_of(flos_.cbegin(), flos_.cend(), [this](auto const &flo) {
+    return std::any_of(flos_.cbegin(), flos_.cend(), [](auto const &flo) {
         return !flo.second->get_unknown_jumps().empty();
     });
 }

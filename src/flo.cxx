@@ -1,5 +1,10 @@
 #include "flo.hxx"
 
+#include "utils/adapters.hxx"
+#include "utils/algorithm.hxx"
+
+#include <iterator>
+
 using namespace rstc;
 
 Flo::Flo(Address entry_point)
@@ -99,19 +104,21 @@ bool Flo::is_conditional_jump(ZydisMnemonic mnemonic)
     case ZYDIS_MNEMONIC_LOOPNE:
         // LOOPxx
         return true;
+    default:
+        // Not Jxx / LOOPxx
+        return false;
     }
-    return false;
 }
 
 std::vector<Context const *> Flo::get_contexts(Address address) const
 {
     std::vector<Context const *> contexts;
-    auto range = in_range(contexts_.equal_range(address));
+    auto range = utils::in_range(contexts_.equal_range(address));
     contexts.reserve(std::distance(range.begin(), range.end()));
     for (auto const &[addr, ctx] : range) {
-        contexts.push_back(ctx.get());
+        contexts.push_back(&ctx);
     }
-    return std::move(contexts);
+    return contexts;
 }
 
 Flo::SPManipulationType Flo::analyze_stack_pointer_manipulation(
@@ -153,6 +160,8 @@ Flo::SPManipulationType Flo::analyze_stack_pointer_manipulation(
         case ZYDIS_MNEMONIC_POPF: stack_depth_ -= 2; return SPModified;
         case ZYDIS_MNEMONIC_POPFD: stack_depth_ -= 4; return SPModified;
         case ZYDIS_MNEMONIC_POPFQ: stack_depth_ -= 8; return SPModified;
+
+        default: break;
         }
     }
     return SPUnmodified;
@@ -183,40 +192,46 @@ void Flo::promote_unknown_jumps(Jump::Type type,
     }
 }
 
+void Flo::filter_contexts(Address address, Contexts &contexts)
+{
+    // Compare contexts with existing contexts, eliminating duplicates.
+    // It should be enough to filter once per basic block.
+    utils::set_difference_move_multimap_values(contexts, contexts_, address);
+}
+
 Flo::ContextPropagationResult Flo::propagate_contexts(Address address,
-                                                      ContextPtrs contexts)
+                                                      Contexts contexts)
 {
     ContextPropagationResult result;
     auto it_instr = disassembly_.find(address);
     if (it_instr == disassembly_.end()) {
-        return std::move(result);
-    }
-    // Compare contexts with existing contexts, eliminating duplicates, and
-    // stopping if there are no new contexts
-    // TODO: make this check only once per basic block
-    for (auto const &[addr, ctx] : in_range(contexts_.equal_range(address))) {
-        std::erase_if(contexts, [&ctx](ContextPtr const &context) {
-            return ctx->registers_equal(*context);
-        });
-    }
-    if (contexts.empty()) {
-        return std::move(result);
+        return result;
     }
     result.instruction = &*it_instr->second;
-    result.new_contexts.reserve(contexts.size());
-    std::transform(
-        contexts.begin(),
-        contexts.end(),
-        std::back_inserter(result.new_contexts),
-        [this, address, instr = result.instruction](ContextPtr const &context) {
-            auto new_context = context->make_child();
-            emulate(address, *instr, *new_context);
-            return new_context;
-        });
-    for (auto &&context : contexts) {
-        contexts_.emplace(address, std::move(context));
+    while (!contexts.empty()) {
+        auto const &context = emplace_context(
+            address,
+            std::move(contexts.extract(std::prev(contexts.end())).value()));
+        auto new_context = context.make_child();
+        emulate(address, *result.instruction, new_context);
+        result.new_contexts.emplace(std::move(new_context));
     }
-    return std::move(result);
+    return result;
+}
+
+Context const &Flo::emplace_context(Address address, Context &&context)
+{
+    auto range = utils::in_range(contexts_.equal_range(address));
+    auto insert_hint = std::upper_bound(range.begin(),
+                                        range.end(),
+                                        context.get_hash(),
+                                        [](size_t hash, auto const &it) {
+                                            return hash < it.second.get_hash();
+                                        });
+    auto emplaced = contexts_.emplace_hint(insert_hint,
+                                           address,
+                                           std::forward<Context>(context));
+    return emplaced->second;
 }
 
 void Flo::emulate(Address address,
@@ -239,6 +254,8 @@ void Flo::emulate(Address address,
                 context.set(*value, size, address);
             }
             break;
+
+        default: break;
         }
     }
 }
@@ -370,15 +387,15 @@ Address Flo::get_jump_destination(Address address,
     switch (op.type) {
     case ZYDIS_OPERAND_TYPE_IMMEDIATE:
         return address + instruction.length + op.imm.value.s;
+    default: return nullptr;
     }
-    return nullptr;
 }
 
 std::vector<Address>
 Flo::get_jump_destinations(PE const &pe,
                            Address address,
                            ZydisDecodedInstruction const &instruction,
-                           ContextPtrs const &contexts)
+                           Contexts const &contexts)
 {
     assert(instruction.mnemonic == ZYDIS_MNEMONIC_JMP
            || is_conditional_jump(instruction.mnemonic));
@@ -388,10 +405,11 @@ Flo::get_jump_destinations(PE const &pe,
     switch (op.type) {
     case ZYDIS_OPERAND_TYPE_IMMEDIATE:
         dsts.push_back(address + instruction.length + op.imm.value.s);
+        break;
     case ZYDIS_OPERAND_TYPE_REGISTER:
         dsts.reserve(contexts.size());
         for (auto const &context : contexts) {
-            if (auto va_dst = context->get(op.reg.value).value; va_dst) {
+            if (auto va_dst = context.get(op.reg.value).value; va_dst) {
                 if (auto dst = pe.virtual_to_raw_address(*va_dst); dst) {
                     dsts.push_back(dst);
                 }
@@ -401,15 +419,17 @@ Flo::get_jump_destinations(PE const &pe,
     case ZYDIS_OPERAND_TYPE_MEMORY:
         dsts.reserve(contexts.size());
         for (auto const &context : contexts) {
-            if (auto [va_dst, size] = get_memory_address(op, *context);
+            if (auto [va_dst, size] = get_memory_address(op, context);
                 va_dst.has_value()) {
                 if (auto dst = pe.virtual_to_raw_address(*va_dst); dst) {
                     dsts.push_back(dst);
                 }
             }
         }
+        break;
+    default: break;
     }
-    return std::move(dsts);
+    return dsts;
 }
 
 Address Flo::get_call_destination(Address address,
@@ -422,8 +442,8 @@ Address Flo::get_call_destination(Address address,
     switch (op.type) {
     case ZYDIS_OPERAND_TYPE_IMMEDIATE:
         return address + instruction.length + op.imm.value.s;
+    default: return nullptr;
     }
-    return nullptr;
 }
 
 std::pair<Context::Value, size_t>

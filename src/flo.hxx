@@ -75,7 +75,7 @@ namespace rstc {
         };
 
         struct ContextPropagationResult {
-            ContextPtrs new_contexts = {};
+            Contexts new_contexts;
             ZydisDecodedInstruction const *instruction = nullptr;
         };
 
@@ -90,8 +90,9 @@ namespace rstc {
         promote_unknown_jumps(Jump::Type type,
                               std::function<bool(Address)> predicate = nullptr);
 
+        void filter_contexts(Address address, Contexts &contexts);
         ContextPropagationResult propagate_contexts(Address address,
-                                                    ContextPtrs contexts);
+                                                    Contexts contexts);
 
         ZydisDecodedInstruction const *get_instruction(Address address) const;
 
@@ -102,7 +103,7 @@ namespace rstc {
         get_jump_destinations(PE const &pe,
                               Address address,
                               ZydisDecodedInstruction const &instruction,
-                              ContextPtrs const &context);
+                              Contexts const &context);
         static Address
         get_call_destination(Address address,
                              ZydisDecodedInstruction const &instruction);
@@ -113,7 +114,7 @@ namespace rstc {
         static bool is_conditional_jump(ZydisMnemonic mnemonic);
 
         std::vector<Context const *> get_contexts(Address address) const;
-        inline std::multimap<Address, ContextPtr> const &get_contexts() const
+        inline std::multimap<Address, Context> const &get_contexts() const
         {
             return contexts_;
         }
@@ -144,6 +145,7 @@ namespace rstc {
         void visit(Address address);
         bool promote_unknown_jumps(Address dst, Jump::Type new_type);
 
+        Context const &emplace_context(Address address, Context &&context);
         static void emulate(Address address,
                             ZydisDecodedInstruction const &instruction,
                             Context &context);
@@ -154,7 +156,7 @@ namespace rstc {
         void add_call(Address dst, Address src, Address ret);
 
         Disassembly disassembly_;
-        std::multimap<Address, ContextPtr> contexts_;
+        std::multimap<Address, Context> contexts_;
         Jumps inner_jumps_;
         Jumps outer_jumps_;
         Jumps unknown_jumps_;

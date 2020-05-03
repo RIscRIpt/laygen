@@ -12,6 +12,8 @@ find_package(zycore)
 file(GLOB SOURCE_FILES
     "src/*.cxx"
     "src/*.hxx"
+    "src/utils/*.cxx"
+    "src/utils/*.hxx"
 )
 
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})

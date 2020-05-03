@@ -3,6 +3,7 @@
 #include "dumper.hxx"
 
 #include <algorithm>
+#include <iterator>
 #include <iostream>
 
 using namespace rstc;
@@ -18,25 +19,32 @@ Restruc::Restruc(Reflo &reflo)
 void Restruc::analyze()
 {
     if (auto ep = reflo_.get_entry_flo(); ep) {
-        propagate_contexts(ep->entry_point, std::move(make_initial_contexts()));
+        propagate_contexts(ep->entry_point, make_initial_contexts());
     }
 }
 
-ContextPtrs
+Contexts
 Restruc::propagate_contexts(Address address,
-                            ContextPtrs contexts,
+                            Contexts contexts,
                             std::unordered_multiset<Address> visited)
 {
-    ZydisDecodedInstruction const *instr;
     Flo *flo = reflo_.get_flo_by_address(address);
     if (!flo) {
-        return std::move(contexts);
+        return contexts;
     }
-    ContextPtrs return_contexts;
+    Contexts return_contexts;
+    bool new_basic_block = true;
     // Visit visited instructions without going deeper.
     while (address && !contexts.empty() && visited.count(address) < 2) {
+        if (new_basic_block) {
+            new_basic_block = false;
+            flo->filter_contexts(address, contexts);
+            if (contexts.empty()) {
+                break;
+            }
+            flatten_contexts(contexts);
+        }
         visited.emplace(address);
-        DWORD va = pe_.raw_to_virtual_address(address);
         auto propagation_result =
             flo->propagate_contexts(address, std::move(contexts));
         contexts = std::move(propagation_result.new_contexts);
@@ -60,7 +68,7 @@ Restruc::propagate_contexts(Address address,
             break;
         }
         if (instr->mnemonic == ZYDIS_MNEMONIC_CALL) {
-            ContextPtrs next_contexts;
+            Contexts next_contexts;
             if (auto dst = flo->get_call_destination(address, *instr); dst) {
                 auto child_contexts = make_child_contexts(contexts);
                 next_contexts =
@@ -84,12 +92,12 @@ Restruc::propagate_contexts(Address address,
                 auto next_contexts =
                     propagate_contexts(dst, std::move(child_contexts), visited);
                 if (unconditional_jump) {
-                    return std::move(next_contexts);
+                    // TODO: check if this is correct
+                    return next_contexts;
                 }
                 else {
-                    std::copy(std::make_move_iterator(next_contexts.begin()),
-                              std::make_move_iterator(next_contexts.end()),
-                              std::back_inserter(return_contexts));
+                    merge_contexts(return_contexts, std::move(next_contexts));
+                    new_basic_block = true;
                 }
             }
             if (dsts.empty() && unconditional_jump) {
@@ -97,51 +105,69 @@ Restruc::propagate_contexts(Address address,
             }
         }
         else if (instr->mnemonic == ZYDIS_MNEMONIC_RET) {
-            std::copy(std::make_move_iterator(contexts.begin()),
-                      std::make_move_iterator(contexts.end()),
-                      std::back_inserter(return_contexts));
+            merge_contexts(return_contexts, std::move(contexts));
             break;
         }
         address += instr->length;
     }
-    return std::move(return_contexts);
+    return return_contexts;
 }
 
-ContextPtrs Restruc::make_initial_contexts()
+Contexts Restruc::make_initial_contexts()
 {
     auto ep = reflo_.get_pe().get_entry_point();
-    auto c = std::make_unique<Context>(ep);
-    c->set(ZYDIS_REGISTER_RAX, ep, pe_.raw_to_virtual_address(ep));
-    c->set(ZYDIS_REGISTER_RDX, c->get(ZYDIS_REGISTER_RAX));
-    c->set(ZYDIS_REGISTER_RBP, ep, 0x8000000000000000);
-    c->set(ZYDIS_REGISTER_RSP, ep, 0x8000000000000000);
-    c->set(ZYDIS_REGISTER_R8, c->get(ZYDIS_REGISTER_RCX));
-    c->set(ZYDIS_REGISTER_R9, c->get(ZYDIS_REGISTER_RAX));
-    c->set(ZYDIS_REGISTER_RFLAGS, 0x244, ep);
-    ContextPtrs contexts;
-    contexts.reserve(1);
-    contexts.emplace_back(std::move(c));
-    return std::move(contexts);
+    auto c = Context(ep);
+    c.set(ZYDIS_REGISTER_RAX, ep, pe_.raw_to_virtual_address(ep));
+    c.set(ZYDIS_REGISTER_RDX, c.get(ZYDIS_REGISTER_RAX));
+    c.set(ZYDIS_REGISTER_RBP, ep, 0x8000000000000000);
+    c.set(ZYDIS_REGISTER_RSP, ep, 0x8000000000000000);
+    c.set(ZYDIS_REGISTER_R8, c.get(ZYDIS_REGISTER_RCX));
+    c.set(ZYDIS_REGISTER_R9, c.get(ZYDIS_REGISTER_RAX));
+    c.set(ZYDIS_REGISTER_RFLAGS, 0x244, ep);
+    Contexts contexts;
+    contexts.emplace(std::move(c));
+    return contexts;
 }
 
-ContextPtrs Restruc::make_child_contexts(ContextPtrs const &parents)
+void Restruc::flatten_contexts(Contexts &contexts)
 {
-    ContextPtrs child_contexts;
-    child_contexts.reserve(parents.size());
+    Contexts new_contexts;
+    std::transform(contexts.begin(),
+                   contexts.end(),
+                   std::inserter(new_contexts, new_contexts.end()),
+                   [](Context const &context) {
+                       Context new_context(&context, true);
+                       return new_context;
+                   });
+}
+
+Contexts Restruc::make_child_contexts(Contexts const &parents)
+{
+    Contexts child_contexts;
     std::transform(
         parents.begin(),
         parents.end(),
-        std::back_inserter(child_contexts),
+        std::inserter(child_contexts, child_contexts.end()),
         std::bind(&Context::make_flatten_child, std::placeholders::_1));
-    return std::move(child_contexts);
+    return child_contexts;
 }
 
-void Restruc::set_contexts_return_value(ContextPtrs &contexts,
-                                        Address call_instr)
+void Restruc::merge_contexts(Contexts &dst, Contexts contexts)
 {
-    for (auto const &context : contexts) {
-        context->set(ZYDIS_REGISTER_RAX, call_instr);
-    }
+    dst.merge(std::move(contexts));
+}
+
+void Restruc::set_contexts_return_value(Contexts &contexts, Address call_instr)
+{
+    Contexts new_contexts;
+    std::transform(contexts.begin(),
+                   contexts.end(),
+                   std::inserter(new_contexts, new_contexts.end()),
+                   [call_instr](Context const &context) {
+                       Context new_context(&context, true);
+                       new_context.set(ZYDIS_REGISTER_RAX, call_instr);
+                       return new_context;
+                   });
 }
 
 bool Restruc::instruction_has_memory_access(
@@ -214,6 +240,7 @@ void Restruc::dump_instruction_history(
                     }
                 }
                 break;
+            default: break;
             }
         }
     }

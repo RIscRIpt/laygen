@@ -157,11 +157,19 @@ static const std::unordered_map<ZydisRegister, ZydisRegister>
         { ZYDIS_REGISTER_YMM31, ZYDIS_REGISTER_ZMM31 },
     };
 
+template<class T>
+inline void hash_combine(std::size_t &seed, const T &v)
+{
+    std::hash<T> hasher;
+    seed ^= hasher(v) * 0x5851F42D4C957F2D + 0x14057B7EF767814F;
+}
+
 Context::Context(Address source)
     : parent_(nullptr)
     , flatten_(true)
+    , hash_(0)
+    , registers_()
     , memory_(source)
-    , registers_hash_(0)
 {
     set_all_registers_zero(source);
 }
@@ -169,25 +177,13 @@ Context::Context(Address source)
 Context::Context(Context const *parent, bool flatten)
     : parent_(parent)
     , flatten_(false)
+    , hash_(parent->hash_)
+    , registers_()
     , memory_(parent->memory_.get_root_source())
-    , registers_hash_(parent->registers_hash_)
 {
     if (flatten) {
         flattenize();
     }
-}
-
-bool Context::registers_equal(Context const &other) const
-{
-    if (registers_hash_ != other.registers_hash_) {
-        return false;
-    }
-    for (auto reg : REGISTERS) {
-        if (get(reg) != other.get(reg)) {
-            return false;
-        }
-    }
-    return true;
 }
 
 Context::ValueSource Context::get(ZydisRegister reg) const
@@ -225,9 +221,13 @@ void Context::set(ZydisRegister reg, ValueSource valsrc)
         it != REGISTER_PROMOTION_MAP.end()) {
         reg = it->second;
     }
-    hash_combine(registers_hash_, reg);
-    hash_combine(registers_hash_, valsrc.value);
-    hash_combine(registers_hash_, valsrc.source);
+    // TODO: check if hash_ is correct
+    // i.e. for two equal Contexts, hash_ is the same.
+    hash_combine(hash_, reg);
+    if (valsrc.value) {
+        hash_combine(hash_, *valsrc.value);
+    }
+    hash_combine(hash_, valsrc.source);
     registers_.insert_or_assign(reg, valsrc);
 }
 
@@ -245,7 +245,10 @@ void Context::set(uintptr_t address, size_t size, Address source)
 
 void Context::flattenize()
 {
-    registers_hash_ = 0;
+    if (flatten_) {
+        return;
+    }
+    hash_ = 0;
     for (auto reg : REGISTERS) {
         set(reg, get(reg));
     }
@@ -269,12 +272,12 @@ void Context::flattenize()
     flatten_ = true;
 }
 
-ContextPtr Context::make_child() const
+Context Context::make_child() const
 {
-    return std::make_unique<Context>(this);
+    return Context(this);
 }
 
-ContextPtr Context::make_flatten_child() const
+Context Context::make_flatten_child() const
 {
-    return std::make_unique<Context>(this, true);
+    return Context(this, true);
 }

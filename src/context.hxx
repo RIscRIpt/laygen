@@ -6,14 +6,10 @@
 #include <Zydis/Zydis.h>
 
 #include <optional>
+#include <set>
 #include <unordered_map>
-#include <vector>
 
 namespace rstc {
-
-    class Context;
-    using ContextPtr = std::unique_ptr<Context>;
-    using ContextPtrs = std::vector<ContextPtr>;
 
     class Context {
     public:
@@ -31,10 +27,15 @@ namespace rstc {
             }
         };
 
+        Context() = delete;
         Context(Address source);
         Context(Context const *parent, bool flatten = false);
 
-        bool registers_equal(Context const &other) const;
+        Context(Context const &) = delete;
+        Context(Context &&other) = default;
+
+        Context &operator=(Context const &) = delete;
+        Context &operator=(Context &&rhs) = default;
 
         ValueSource get(ZydisRegister reg) const;
         VirtualMemory::Sources get(uintptr_t address, size_t size) const;
@@ -45,9 +46,23 @@ namespace rstc {
 
         void flattenize();
 
-        ContextPtr make_child() const;
-        ContextPtr make_flatten_child() const;
+        Context make_child() const;
+        Context make_flatten_child() const;
 
+        inline bool operator<(Context const &rhs) const
+        {
+            return hash_ < rhs.hash_;
+        }
+        inline bool operator==(Context const &rhs) const
+        {
+            return hash_ == rhs.hash_;
+        }
+        inline bool operator!=(Context const &rhs) const
+        {
+            return hash_ != rhs.hash_;
+        }
+
+        inline size_t get_hash() const { return hash_; }
         inline std::unordered_map<ZydisRegister, ValueSource> const &
         get_changed_registers()
         {
@@ -59,9 +74,10 @@ namespace rstc {
 
         Context const *parent_;
         bool flatten_;
-        size_t registers_hash_;
+        size_t hash_;
         std::unordered_map<ZydisRegister, ValueSource> registers_;
         VirtualMemory memory_;
     };
 
+    using Contexts = std::set<Context>;
 }
