@@ -37,7 +37,7 @@ namespace rstc {
         Context &operator=(Context const &) = delete;
         Context &operator=(Context &&rhs) = default;
 
-        ValueSource get(ZydisRegister reg) const;
+        std::optional<ValueSource> get(ZydisRegister reg) const;
         VirtualMemory::Sources get(uintptr_t address, size_t size) const;
 
         void set(ZydisRegister reg, Address source, Value value = std::nullopt);

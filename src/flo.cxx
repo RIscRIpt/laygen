@@ -246,7 +246,9 @@ void Flo::emulate(Address address,
         }
         switch (op.type) {
         case ZYDIS_OPERAND_TYPE_REGISTER:
-            context.set(op.reg.value, address, context.get(op.reg.value).value);
+            if (auto reg = context.get(op.reg.value); reg) {
+                context.set(op.reg.value, address, reg->value);
+            }
             break;
         case ZYDIS_OPERAND_TYPE_MEMORY:
             if (auto [value, size] = get_memory_address(op, context);
@@ -254,7 +256,6 @@ void Flo::emulate(Address address,
                 context.set(*value, size, address);
             }
             break;
-
         default: break;
         }
     }
@@ -409,8 +410,9 @@ Flo::get_jump_destinations(PE const &pe,
     case ZYDIS_OPERAND_TYPE_REGISTER:
         dsts.reserve(contexts.size());
         for (auto const &context : contexts) {
-            if (auto va_dst = context.get(op.reg.value).value; va_dst) {
-                if (auto dst = pe.virtual_to_raw_address(*va_dst); dst) {
+            if (auto va_dst = context.get(op.reg.value);
+                va_dst && va_dst->value) {
+                if (auto dst = pe.virtual_to_raw_address(*va_dst->value); dst) {
                     dsts.push_back(dst);
                 }
             }
@@ -453,9 +455,8 @@ Flo::get_memory_address(ZydisDecodedOperand const &op, Context const &context)
     Context::Value::value_type value = 0;
     if (op.mem.base != ZYDIS_REGISTER_NONE
         && op.mem.base != ZYDIS_REGISTER_RIP) {
-        if (auto base_value = context.get(op.mem.base).value;
-            base_value.has_value()) {
-            value += *base_value;
+        if (auto base = context.get(op.mem.base); base && base->value) {
+            value += *base->value;
         }
         else {
             return { std::nullopt, 0 };
@@ -465,9 +466,8 @@ Flo::get_memory_address(ZydisDecodedOperand const &op, Context const &context)
         value += op.mem.disp.value;
     }
     if (op.mem.index != ZYDIS_REGISTER_NONE) {
-        if (auto index_value = context.get(op.mem.index).value;
-            index_value.has_value()) {
-            value += *index_value * op.mem.scale;
+        if (auto index = context.get(op.mem.index); index && index->value) {
+            value += *index->value * op.mem.scale;
         }
         else {
             return { std::nullopt, 0 };

@@ -8,7 +8,7 @@
 
 using namespace rstc;
 
-#define DEBUG_CONTEXT_PROPAGATION
+// #define DEBUG_CONTEXT_PROPAGATION
 
 Restruc::Restruc(Reflo &reflo)
     : reflo_(reflo)
@@ -23,6 +23,7 @@ void Restruc::analyze()
     }
 }
 
+// TODO: check for recursion
 Contexts
 Restruc::propagate_contexts(Address address,
                             Contexts contexts,
@@ -118,11 +119,11 @@ Contexts Restruc::make_initial_contexts()
     auto ep = reflo_.get_pe().get_entry_point();
     auto c = Context(ep);
     c.set(ZYDIS_REGISTER_RAX, ep, pe_.raw_to_virtual_address(ep));
-    c.set(ZYDIS_REGISTER_RDX, c.get(ZYDIS_REGISTER_RAX));
+    c.set(ZYDIS_REGISTER_RDX, *c.get(ZYDIS_REGISTER_RAX));
     c.set(ZYDIS_REGISTER_RBP, ep, 0x8000000000000000);
     c.set(ZYDIS_REGISTER_RSP, ep, 0x8000000000000000);
-    c.set(ZYDIS_REGISTER_R8, c.get(ZYDIS_REGISTER_RCX));
-    c.set(ZYDIS_REGISTER_R9, c.get(ZYDIS_REGISTER_RAX));
+    c.set(ZYDIS_REGISTER_R8, *c.get(ZYDIS_REGISTER_RCX));
+    c.set(ZYDIS_REGISTER_R9, *c.get(ZYDIS_REGISTER_RAX));
     c.set(ZYDIS_REGISTER_RFLAGS, 0x244, ep);
     Contexts contexts;
     contexts.emplace(std::move(c));
@@ -225,16 +226,15 @@ void Restruc::dump_instruction_history(
             }
             switch (op.type) {
             case ZYDIS_OPERAND_TYPE_REGISTER:
-                if (auto changed = context->get(op.reg.value);
-                    changed.source != nullptr) {
-                    auto flo = reflo_.get_flo_by_address(changed.source);
+                if (auto changed = context->get(op.reg.value); changed) {
+                    auto flo = reflo_.get_flo_by_address(changed->source);
                     if (flo) {
                         dump_instruction_history(
                             os,
                             dumper,
-                            changed.source,
-                            *flo->get_disassembly().at(changed.source),
-                            flo->get_contexts(changed.source),
+                            changed->source,
+                            *flo->get_disassembly().at(changed->source),
+                            flo->get_contexts(changed->source),
                             visited);
                         os << "---\n";
                     }

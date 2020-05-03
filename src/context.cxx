@@ -3,10 +3,11 @@
 #include <algorithm>
 #include <functional>
 #include <stdexcept>
+#include <unordered_set>
 
 using namespace rstc;
 
-static const ZydisRegister REGISTERS[] = {
+static const std::unordered_set<ZydisRegister> REGISTERS{
     ZYDIS_REGISTER_RAX,    ZYDIS_REGISTER_RCX,        ZYDIS_REGISTER_RDX,
     ZYDIS_REGISTER_RBX,    ZYDIS_REGISTER_RSP,        ZYDIS_REGISTER_RBP,
     ZYDIS_REGISTER_RSI,    ZYDIS_REGISTER_RDI,        ZYDIS_REGISTER_R8,
@@ -186,7 +187,7 @@ Context::Context(Context const *parent, bool flatten)
     }
 }
 
-Context::ValueSource Context::get(ZydisRegister reg) const
+std::optional<Context::ValueSource> Context::get(ZydisRegister reg) const
 {
     Context const *c = this;
     do {
@@ -198,7 +199,7 @@ Context::ValueSource Context::get(ZydisRegister reg) const
         }
         c = c->parent_;
     } while (c);
-    return { {}, nullptr };
+    return std::nullopt;
 }
 
 VirtualMemory::Sources Context::get(uintptr_t address, size_t size) const
@@ -221,7 +222,20 @@ void Context::set(ZydisRegister reg, ValueSource valsrc)
         it != REGISTER_PROMOTION_MAP.end()) {
         reg = it->second;
     }
-    hash_combine(hash_, reg);
+    else if (!REGISTERS.contains(reg)) {
+        return;
+    }
+    if (auto old = get(reg); old) {
+        hash_combine(hash_, old->source);
+        if (old->value) {
+            hash_combine(hash_, *old->value);
+        }
+        // Don't "un"-hash `reg`,
+        // as we will hash it only if old value didn't exist
+    }
+    else {
+        hash_combine(hash_, reg);
+    }
     if (valsrc.value) {
         hash_combine(hash_, *valsrc.value);
     }
@@ -247,7 +261,14 @@ void Context::flatten()
         return;
     }
     for (auto reg : REGISTERS) {
-        set(reg, get(reg));
+        if (auto valsrc = get(reg); valsrc) {
+#ifndef NDEBUG
+            set(reg, *valsrc);
+#else
+            // Set without changing hash_
+            registers_.insert_or_assign(reg, *valsrc);
+#endif
+        }
     }
     std::vector<Context const *> context_path;
     context_path.push_back(parent_);
@@ -265,7 +286,7 @@ void Context::flatten()
             set(m.start, m.end - m.start, m.source);
         }
     }
-    hash_ = parent_->hash_;
+    assert(hash_ == parent_->hash_);
     parent_ = nullptr;
     flatten_ = true;
 }
