@@ -182,7 +182,7 @@ Context::Context(Context const *parent, bool flatten)
     , memory_(parent->memory_.get_root_source())
 {
     if (flatten) {
-        flattenize();
+        this->flatten();
     }
 }
 
@@ -241,7 +241,7 @@ void Context::set(uintptr_t address, size_t size, Address source)
     memory_.assign(address, size, source);
 }
 
-void Context::flattenize()
+void Context::flatten()
 {
     if (flatten_) {
         return;

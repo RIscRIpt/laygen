@@ -44,7 +44,7 @@ namespace rstc {
         void set(ZydisRegister reg, ValueSource valsrc);
         void set(uintptr_t address, size_t size, Address source);
 
-        void flattenize();
+        void flatten();
 
         Context make_child() const;
         Context make_flatten_child() const;
