@@ -12,7 +12,6 @@ void Dumper::dump_flo(std::ostream &os,
                       Flo const &flo,
                       DWORD entry_point_va) const
 {
-    char buffer[256];
     os << std::hex << std::setfill('0');
     os << std::setw(8) << entry_point_va << ":\n";
     for (auto const &[address, instr] : flo.get_disassembly()) {
