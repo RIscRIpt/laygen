@@ -23,11 +23,9 @@ void Restruc::analyze()
     }
 }
 
-// TODO: check for recursion
-Contexts
-Restruc::propagate_contexts(Address address,
-                            Contexts contexts,
-                            std::unordered_multiset<Address> visited)
+Contexts Restruc::propagate_contexts(Address address,
+                                     Contexts contexts,
+                                     std::unordered_multiset<Address> visited)
 {
     Flo *flo = reflo_.get_flo_by_address(address);
     if (!flo) {
@@ -51,14 +49,13 @@ Restruc::propagate_contexts(Address address,
         contexts = std::move(propagation_result.new_contexts);
         auto const instr = propagation_result.instruction;
 #ifdef DEBUG_CONTEXT_PROPAGATION
+        DWORD va = pe_.raw_to_virtual_address(address);
         std::clog << std::dec << std::setfill(' ') << std::setw(8)
                   << visited.count(address) << '/' << std::setw(8)
                   << contexts.size() << ' ';
         if (instr) {
             Dumper dumper;
-            dumper.dump_instruction(std::clog,
-                                    pe_.raw_to_virtual_address(address),
-                                    *instr);
+            dumper.dump_instruction(std::clog, va, *instr);
         }
         else {
             std::clog << std::hex << std::setfill('0') << std::setw(8)
@@ -92,12 +89,11 @@ Restruc::propagate_contexts(Address address,
                 auto child_contexts = make_child_contexts(contexts);
                 auto next_contexts =
                     propagate_contexts(dst, std::move(child_contexts), visited);
+                merge_contexts(return_contexts, std::move(next_contexts));
                 if (unconditional_jump) {
-                    // TODO: check if this is correct
-                    return next_contexts;
+                    break;
                 }
                 else {
-                    merge_contexts(return_contexts, std::move(next_contexts));
                     new_basic_block = true;
                 }
             }

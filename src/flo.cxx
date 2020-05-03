@@ -251,8 +251,7 @@ void Flo::emulate(Address address,
             }
             break;
         case ZYDIS_OPERAND_TYPE_MEMORY:
-            if (auto [value, size] = get_memory_address(op, context);
-                value.has_value()) {
+            if (auto [value, size] = get_memory_address(op, context); value) {
                 context.set(*value, size, address);
             }
             break;
@@ -413,17 +412,6 @@ Flo::get_jump_destinations(PE const &pe,
             if (auto va_dst = context.get(op.reg.value);
                 va_dst && va_dst->value) {
                 if (auto dst = pe.virtual_to_raw_address(*va_dst->value); dst) {
-                    dsts.push_back(dst);
-                }
-            }
-        }
-        break;
-    case ZYDIS_OPERAND_TYPE_MEMORY:
-        dsts.reserve(contexts.size());
-        for (auto const &context : contexts) {
-            if (auto [va_dst, size] = get_memory_address(op, context);
-                va_dst.has_value()) {
-                if (auto dst = pe.virtual_to_raw_address(*va_dst); dst) {
                     dsts.push_back(dst);
                 }
             }

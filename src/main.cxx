@@ -28,7 +28,7 @@ int wmain(int argc, wchar_t *argv[])
                   << std::setw(8) << analyzed.second << "]\n";
         std::cout << "Restruc::analyze ...\n";
         restruc.analyze();
-        // restruc.debug(std::cout);
+        restruc.debug(std::cout);
 #endif
     }
     catch (std::exception const &e) {
