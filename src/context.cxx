@@ -221,8 +221,6 @@ void Context::set(ZydisRegister reg, ValueSource valsrc)
         it != REGISTER_PROMOTION_MAP.end()) {
         reg = it->second;
     }
-    // TODO: check if hash_ is correct
-    // i.e. for two equal Contexts, hash_ is the same.
     hash_combine(hash_, reg);
     if (valsrc.value) {
         hash_combine(hash_, *valsrc.value);
@@ -248,7 +246,6 @@ void Context::flattenize()
     if (flatten_) {
         return;
     }
-    hash_ = 0;
     for (auto reg : REGISTERS) {
         set(reg, get(reg));
     }
@@ -268,6 +265,7 @@ void Context::flattenize()
             set(m.start, m.end - m.start, m.source);
         }
     }
+    hash_ = parent_->hash_;
     parent_ = nullptr;
     flatten_ = true;
 }
