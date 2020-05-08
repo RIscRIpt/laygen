@@ -16,7 +16,17 @@ file(GLOB SOURCE_FILES
     "src/utils/*.hxx"
 )
 
+file(GLOB DUMMY_SOURCE_FILES
+    "test/dummy/*.cxx"
+    "test/dummy/*.hxx"
+)
+
+set(DUMMY_NAME dummy)
+
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})
+add_executable(${DUMMY_NAME} ${DUMMY_SOURCE_FILES})
+
+add_dependencies(${PROJECT_NAME} ${DUMMY_NAME})
 
 set_target_properties(
     ${PROJECT_NAME} PROPERTIES
