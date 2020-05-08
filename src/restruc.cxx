@@ -19,24 +19,12 @@ static ZydisRegister const VOLATILE_REGISTERS[] = {
 };
 
 static ZydisRegister const NONVOLATILE_REGISTERS[] = {
-    ZYDIS_REGISTER_RBX,
-    ZYDIS_REGISTER_RBP,
-    ZYDIS_REGISTER_RSP,
-    ZYDIS_REGISTER_RDI,
-    ZYDIS_REGISTER_RSI,
-    ZYDIS_REGISTER_R12,
-    ZYDIS_REGISTER_R13,
-    ZYDIS_REGISTER_R14,
-    ZYDIS_REGISTER_R15,
-    ZYDIS_REGISTER_ZMM6,
-    ZYDIS_REGISTER_ZMM7,
-    ZYDIS_REGISTER_ZMM8,
-    ZYDIS_REGISTER_ZMM9,
-    ZYDIS_REGISTER_ZMM10,
-    ZYDIS_REGISTER_ZMM11,
-    ZYDIS_REGISTER_ZMM12,
-    ZYDIS_REGISTER_ZMM13,
-    ZYDIS_REGISTER_ZMM14,
+    ZYDIS_REGISTER_RBX,   ZYDIS_REGISTER_RBP,   ZYDIS_REGISTER_RSP,
+    ZYDIS_REGISTER_RDI,   ZYDIS_REGISTER_RSI,   ZYDIS_REGISTER_R12,
+    ZYDIS_REGISTER_R13,   ZYDIS_REGISTER_R14,   ZYDIS_REGISTER_R15,
+    ZYDIS_REGISTER_ZMM6,  ZYDIS_REGISTER_ZMM7,  ZYDIS_REGISTER_ZMM8,
+    ZYDIS_REGISTER_ZMM9,  ZYDIS_REGISTER_ZMM10, ZYDIS_REGISTER_ZMM11,
+    ZYDIS_REGISTER_ZMM12, ZYDIS_REGISTER_ZMM13, ZYDIS_REGISTER_ZMM14,
     ZYDIS_REGISTER_ZMM15,
 };
 
@@ -123,12 +111,12 @@ Contexts Restruc::propagate_contexts(Address address,
                     propagate_contexts(dst, std::move(child_contexts));
                 merge_contexts(return_contexts, std::move(next_contexts));
             }
-                if (unconditional_jump) {
-                    break;
-                }
-                else {
-                    new_basic_block = true;
-                }
+            if (unconditional_jump) {
+                break;
+            }
+            else {
+                new_basic_block = true;
+            }
             if (dsts.empty() && unconditional_jump) {
                 break;
             }
@@ -222,8 +210,8 @@ void rstc::Restruc::set_contexts_after_call(Contexts &contexts,
                     }
                 }
             }
-                       return new_context;
-                   });
+            return new_context;
+        });
     contexts = std::move(reverted_contexts);
 }
 
@@ -269,17 +257,15 @@ void Restruc::dump_instruction_history(
     std::vector<Context const *> const &contexts,
     std::unordered_set<Address> visited)
 {
-    if (visited.contains(address)) {
-        return;
-    }
     visited.emplace(address);
-    dumper.dump_instruction(os, pe_.raw_to_virtual_address(address), instr);
-    for (auto context : contexts) {
-        for (size_t i = 0; i < instr.operand_count; i++) {
-            auto const &op = instr.operands[i];
-            if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
-                continue;
-            }
+    DWORD va = pe_.raw_to_virtual_address(address);
+    dumper.dump_instruction(os, va, instr);
+    for (size_t i = 0; i < instr.operand_count; i++) {
+        auto const &op = instr.operands[i];
+        if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
+            continue;
+        }
+        for (auto context : contexts) {
             switch (op.type) {
             case ZYDIS_OPERAND_TYPE_REGISTER:
                 // Skip stack modification
@@ -288,7 +274,8 @@ void Restruc::dump_instruction_history(
                 }
                 if (auto changed = context->get(op.reg.value); changed) {
                     auto flo = reflo_.get_flo_by_address(changed->source);
-                    if (flo) {
+                    if (flo && !visited.contains(changed->source)) {
+                        visited.emplace(changed->source);
                         dump_instruction_history(
                             os,
                             dumper,
