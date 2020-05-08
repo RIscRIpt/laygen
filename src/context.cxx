@@ -1,6 +1,7 @@
-#include "context.hxx"
+#include "contexts.hxx"
 
 #include <algorithm>
+#include <atomic>
 #include <functional>
 #include <stdexcept>
 #include <unordered_set>
@@ -158,6 +159,8 @@ static const std::unordered_map<ZydisRegister, ZydisRegister>
         { ZYDIS_REGISTER_YMM31, ZYDIS_REGISTER_ZMM31 },
     };
 
+static std::atomic<size_t> GLOBAL_ID = 0;
+
 template<class T>
 inline void hash_combine(std::size_t &seed, const T &v)
 {
@@ -167,22 +170,27 @@ inline void hash_combine(std::size_t &seed, const T &v)
 
 Context::Context(Address source)
     : parent_(nullptr)
-    , flatten_(true)
     , hash_(0)
+    , id_(++GLOBAL_ID)
+    , caller_id_(0)
     , registers_()
     , memory_(source)
+    , flatten_(true)
 {
     set_all_registers_zero(source);
 }
 
-Context::Context(Context const *parent, bool flatten)
+Context::Context(Context const *parent, ParentRole parent_role)
     : parent_(parent)
-    , flatten_(false)
     , hash_(parent->hash_)
+    , id_(++GLOBAL_ID)
+    , caller_id_(parent_role == ParentRole::Caller ? parent->id_ :
+                                                     parent->caller_id_)
     , registers_()
     , memory_(parent->memory_.get_root_source())
+    , flatten_(false)
 {
-    if (flatten) {
+    if (parent_role != ParentRole::Default) {
         this->flatten();
     }
 }
@@ -291,12 +299,7 @@ void Context::flatten()
     flatten_ = true;
 }
 
-Context Context::make_child() const
+Context Context::make_child(ParentRole parent_role) const
 {
-    return Context(this);
-}
-
-Context Context::make_flatten_child() const
-{
-    return Context(this, true);
+    return Context(this, parent_role);
 }

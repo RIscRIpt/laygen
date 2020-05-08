@@ -3,12 +3,42 @@
 #include "dumper.hxx"
 
 #include <algorithm>
-#include <iterator>
 #include <iostream>
+#include <iterator>
 
 using namespace rstc;
 
 // #define DEBUG_CONTEXT_PROPAGATION
+
+static ZydisRegister const VOLATILE_REGISTERS[] = {
+    ZYDIS_REGISTER_RAX,  ZYDIS_REGISTER_RCX,  ZYDIS_REGISTER_RDX,
+    ZYDIS_REGISTER_R8,   ZYDIS_REGISTER_R9,   ZYDIS_REGISTER_R10,
+    ZYDIS_REGISTER_R11,  ZYDIS_REGISTER_ZMM0, ZYDIS_REGISTER_ZMM1,
+    ZYDIS_REGISTER_ZMM2, ZYDIS_REGISTER_ZMM3, ZYDIS_REGISTER_ZMM4,
+    ZYDIS_REGISTER_ZMM5,
+};
+
+static ZydisRegister const NONVOLATILE_REGISTERS[] = {
+    ZYDIS_REGISTER_RBX,
+    ZYDIS_REGISTER_RBP,
+    ZYDIS_REGISTER_RSP,
+    ZYDIS_REGISTER_RDI,
+    ZYDIS_REGISTER_RSI,
+    ZYDIS_REGISTER_R12,
+    ZYDIS_REGISTER_R13,
+    ZYDIS_REGISTER_R14,
+    ZYDIS_REGISTER_R15,
+    ZYDIS_REGISTER_ZMM6,
+    ZYDIS_REGISTER_ZMM7,
+    ZYDIS_REGISTER_ZMM8,
+    ZYDIS_REGISTER_ZMM9,
+    ZYDIS_REGISTER_ZMM10,
+    ZYDIS_REGISTER_ZMM11,
+    ZYDIS_REGISTER_ZMM12,
+    ZYDIS_REGISTER_ZMM13,
+    ZYDIS_REGISTER_ZMM14,
+    ZYDIS_REGISTER_ZMM15,
+};
 
 Restruc::Restruc(Reflo &reflo)
     : reflo_(reflo)
@@ -68,15 +98,16 @@ Contexts Restruc::propagate_contexts(Address address,
         if (instr->mnemonic == ZYDIS_MNEMONIC_CALL) {
             Contexts next_contexts;
             if (auto dst = flo->get_call_destination(address, *instr); dst) {
-                auto child_contexts = make_child_contexts(contexts);
+                auto child_contexts =
+                    make_child_contexts(contexts, Context::ParentRole::Caller);
                 next_contexts =
-                    propagate_contexts(dst, std::move(child_contexts), visited);
+                    propagate_contexts(dst, std::move(child_contexts));
             }
             if (next_contexts.empty()) {
-                set_contexts_return_value(contexts, address);
+                update_contexts_after_unknown_call(contexts, address);
             }
             else {
-                contexts = std::move(next_contexts);
+                set_contexts_after_call(contexts, next_contexts);
             }
         }
         else if (auto unconditional_jump =
@@ -86,17 +117,18 @@ Contexts Restruc::propagate_contexts(Address address,
             auto dsts =
                 flo->get_jump_destinations(pe_, address, *instr, contexts);
             for (auto dst : dsts) {
-                auto child_contexts = make_child_contexts(contexts);
+                auto child_contexts =
+                    make_child_contexts(contexts, Context::ParentRole::None);
                 auto next_contexts =
-                    propagate_contexts(dst, std::move(child_contexts), visited);
+                    propagate_contexts(dst, std::move(child_contexts));
                 merge_contexts(return_contexts, std::move(next_contexts));
+            }
                 if (unconditional_jump) {
                     break;
                 }
                 else {
                     new_basic_block = true;
                 }
-            }
             if (dsts.empty() && unconditional_jump) {
                 break;
             }
@@ -128,24 +160,20 @@ Contexts Restruc::make_initial_contexts()
 
 void Restruc::flatten_contexts(Contexts &contexts)
 {
-    Contexts new_contexts;
-    std::transform(contexts.begin(),
-                   contexts.end(),
-                   std::inserter(new_contexts, new_contexts.end()),
-                   [](Context const &context) {
-                       Context new_context(&context, true);
-                       return new_context;
-                   });
+    auto new_contexts =
+        make_child_contexts(contexts, Context::ParentRole::None);
+    contexts = std::move(new_contexts);
 }
 
-Contexts Restruc::make_child_contexts(Contexts const &parents)
+Contexts Restruc::make_child_contexts(Contexts const &parents,
+                                      Context::ParentRole parent_role)
 {
     Contexts child_contexts;
     std::transform(
         parents.begin(),
         parents.end(),
         std::inserter(child_contexts, child_contexts.end()),
-        std::bind(&Context::make_flatten_child, std::placeholders::_1));
+        std::bind(&Context::make_child, std::placeholders::_1, parent_role));
     return child_contexts;
 }
 
@@ -154,17 +182,49 @@ void Restruc::merge_contexts(Contexts &dst, Contexts contexts)
     dst.merge(std::move(contexts));
 }
 
-void Restruc::set_contexts_return_value(Contexts &contexts, Address call_instr)
+void Restruc::update_contexts_after_unknown_call(Contexts &contexts,
+                                                 Address caller)
 {
     Contexts new_contexts;
     std::transform(contexts.begin(),
                    contexts.end(),
                    std::inserter(new_contexts, new_contexts.end()),
-                   [call_instr](Context const &context) {
-                       Context new_context(&context, true);
-                       new_context.set(ZYDIS_REGISTER_RAX, call_instr);
+                   [caller](Context const &context) {
+                       auto new_context =
+                           context.make_child(Context::ParentRole::None);
+                       // Reset vlatile registers
+                       for (auto volatile_register : VOLATILE_REGISTERS) {
+                           new_context.set(volatile_register, caller);
+                       }
                        return new_context;
                    });
+    contexts = std::move(new_contexts);
+}
+
+void rstc::Restruc::set_contexts_after_call(Contexts &contexts,
+                                            Contexts const &next_contexts)
+{
+    // Revert non-volatile registers
+    Contexts reverted_contexts;
+    std::transform(
+        next_contexts.begin(),
+        next_contexts.end(),
+        std::inserter(reverted_contexts, reverted_contexts.end()),
+        [&contexts](Context const &context) {
+            auto new_context = context.make_child(Context::ParentRole::None);
+            auto caller_context =
+                contexts.get_context_by_id(context.get_caller_id());
+            if (caller_context) {
+                for (auto nonvolatile_register : NONVOLATILE_REGISTERS) {
+                    if (auto valsrc = caller_context->get(nonvolatile_register);
+                        valsrc) {
+                        new_context.set(nonvolatile_register, *valsrc);
+                    }
+                }
+            }
+                       return new_context;
+                   });
+    contexts = std::move(reverted_contexts);
 }
 
 bool Restruc::instruction_has_memory_access(
@@ -222,6 +282,10 @@ void Restruc::dump_instruction_history(
             }
             switch (op.type) {
             case ZYDIS_OPERAND_TYPE_REGISTER:
+                // Skip stack modification
+                if (op.reg.value == ZYDIS_REGISTER_RSP) {
+                    continue;
+                }
                 if (auto changed = context->get(op.reg.value); changed) {
                     auto flo = reflo_.get_flo_by_address(changed->source);
                     if (flo) {

@@ -1,7 +1,6 @@
 #include "flo.hxx"
 
 #include "utils/adapters.hxx"
-#include "utils/algorithm.hxx"
 
 #include <iterator>
 
@@ -196,7 +195,7 @@ void Flo::filter_contexts(Address address, Contexts &contexts)
 {
     // Compare contexts with existing contexts, eliminating duplicates.
     // It should be enough to filter once per basic block.
-    utils::set_difference_move_multimap_values(contexts, contexts_, address);
+    contexts.remove_multimap_duplicates(contexts_, address);
 }
 
 Flo::ContextPropagationResult Flo::propagate_contexts(Address address,
@@ -209,10 +208,9 @@ Flo::ContextPropagationResult Flo::propagate_contexts(Address address,
     }
     result.instruction = &*it_instr->second;
     while (!contexts.empty()) {
-        auto const &context = emplace_context(
-            address,
-            std::move(contexts.extract(std::prev(contexts.end())).value()));
-        auto new_context = context.make_child();
+        auto const &context =
+            emplace_context(address, contexts.pop());
+        auto new_context = context.make_child(Context::ParentRole::Default);
         emulate(address, *result.instruction, new_context);
         result.new_contexts.emplace(std::move(new_context));
     }

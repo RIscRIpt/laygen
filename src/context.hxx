@@ -6,13 +6,25 @@
 #include <Zydis/Zydis.h>
 
 #include <optional>
-#include <set>
 #include <unordered_map>
 
 namespace rstc {
 
     class Context {
     public:
+        enum class ParentRole
+        {
+            // Current Context is flatten, and has no parent
+            None,
+
+            // Current Context is flatten, has no parent,
+            // and has parent_caller_id_ equal to parent's id_.
+            Caller,
+
+            // Current Context is not flatten, and has parent
+            Default,
+        };
+
         using Value = std::optional<uintptr_t>;
         struct ValueSource {
             Value value;
@@ -29,7 +41,8 @@ namespace rstc {
 
         Context() = delete;
         Context(Address source);
-        Context(Context const *parent, bool flatten = false);
+        Context(Context const *parent,
+                ParentRole parent_role = ParentRole::Default);
 
         Context(Context const &) = delete;
         Context(Context &&other) = default;
@@ -46,8 +59,7 @@ namespace rstc {
 
         void flatten();
 
-        Context make_child() const;
-        Context make_flatten_child() const;
+        Context make_child(ParentRole parent_role) const;
 
         inline bool operator<(Context const &rhs) const
         {
@@ -63,6 +75,8 @@ namespace rstc {
         }
 
         inline size_t get_hash() const { return hash_; }
+        inline size_t get_id() const { return id_; }
+        inline size_t get_caller_id() const { return caller_id_; }
         inline std::unordered_map<ZydisRegister, ValueSource> const &
         get_changed_registers()
         {
@@ -73,11 +87,12 @@ namespace rstc {
         void set_all_registers_zero(Address source);
 
         Context const *parent_;
-        bool flatten_;
         size_t hash_;
+        size_t id_;
+        size_t caller_id_;
         std::unordered_map<ZydisRegister, ValueSource> registers_;
         VirtualMemory memory_;
+        bool flatten_;
     };
 
-    using Contexts = std::set<Context>;
 }
