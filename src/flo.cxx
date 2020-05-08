@@ -244,9 +244,8 @@ void Flo::emulate(Address address,
         }
         switch (op.type) {
         case ZYDIS_OPERAND_TYPE_REGISTER:
-            if (auto reg = context.get(op.reg.value); reg) {
-                context.set(op.reg.value, address, reg->value);
-            }
+            // TODO: analyze source, and set source value
+            context.set(op.reg.value, address);
             break;
         case ZYDIS_OPERAND_TYPE_MEMORY:
             if (auto [value, size] = get_memory_address(op, context); value) {
