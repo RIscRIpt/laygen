@@ -58,9 +58,9 @@ namespace rstc {
             Complete,
             AlreadyAnalyzed,
             UnknownJump,
+            OuterJump,
             Next = 0x8000000,
             InnerJump,
-            OuterJump,
         };
 
         enum SPManipulationType {
