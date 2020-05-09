@@ -50,6 +50,9 @@ Flo::AnalysisResult Flo::analyze(Address address, Instruction instr)
                 break;
             case Jump::Inner:
                 if (!is_inside(next_address)) {
+                    if (!end) {
+                        next_address = dst;
+                    }
                     return { InnerJump, next_address };
                 }
                 break;

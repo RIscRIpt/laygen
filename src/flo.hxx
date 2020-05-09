@@ -53,14 +53,14 @@ namespace rstc {
 
     class Flo {
     public:
-        enum AnalysisStatus {
-            Stop,
-            Complete,
-            AlreadyAnalyzed,
-            UnknownJump,
-            OuterJump,
-            Next = 0x8000000,
-            InnerJump,
+        enum AnalysisStatus : bool {
+            Stop = false,
+            Next = true,
+            Complete = Stop,
+            AlreadyAnalyzed = Stop,
+            UnknownJump = Stop,
+            OuterJump = Stop,
+            InnerJump = Next,
         };
 
         enum SPManipulationType {
