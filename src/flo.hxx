@@ -79,11 +79,10 @@ namespace rstc {
             ZydisDecodedInstruction const *instruction = nullptr;
         };
 
-        Flo(Address entry_point = nullptr);
+        Flo(Address entry_point = nullptr,
+            std::optional<Address> end = std::nullopt);
 
-        AnalysisResult analyze(Address address,
-                               Instruction instr,
-                               std::optional<Address> flo_end = std::nullopt);
+        AnalysisResult analyze(Address address, Instruction instr);
         Address get_unanalized_inner_jump_dst() const;
 
         void
@@ -129,16 +128,14 @@ namespace rstc {
         inline Calls const &get_calls() const { return calls_; }
 
         Address const entry_point;
+        std::optional<Address> const end;
 
     private:
-        bool is_inside(Address address,
-                       std::optional<Address> flo_end = std::nullopt) const;
-        Jump::Type
-        get_jump_type(Address dst,
-                      Address src,
-                      Address next,
-                      bool unconditional,
-                      std::optional<Address> flo_end = std::nullopt) const;
+        bool is_inside(Address address) const;
+        Jump::Type get_jump_type(Address dst,
+                                 Address src,
+                                 Address next,
+                                 bool unconditional) const;
 
         SPManipulationType analyze_stack_pointer_manipulation(
             ZydisDecodedInstruction const &instruction);

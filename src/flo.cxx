@@ -6,13 +6,13 @@
 
 using namespace rstc;
 
-Flo::Flo(Address entry_point)
+Flo::Flo(Address entry_point, std::optional<Address> end)
     : entry_point(entry_point)
+    , end(end)
 {
 }
 
-Flo::AnalysisResult
-Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
+Flo::AnalysisResult Flo::analyze(Address address, Instruction instr)
 {
     auto [it, inserted] = disassembly_.emplace(address, std::move(instr));
     if (!inserted) {
@@ -27,7 +27,7 @@ Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
         }
     }
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
-        if (!flo_end && !is_inside(next_address)
+        if (!end && !is_inside(next_address)
             && !promote_unknown_jumps(next_address, Jump::Inner)) {
             return { Complete, next_address };
         }
@@ -38,11 +38,7 @@ Flo::analyze(Address address, Instruction instr, std::optional<Address> flo_end)
         Jump::Type type = Jump::Unknown;
         auto dst = get_jump_destination(address, instruction);
         if (dst) {
-            type = get_jump_type(dst,
-                                 address,
-                                 next_address,
-                                 unconditional,
-                                 flo_end);
+            type = get_jump_type(dst, address, next_address, unconditional);
             add_jump(type, dst, address);
         }
         if (unconditional) {
@@ -208,8 +204,7 @@ Flo::ContextPropagationResult Flo::propagate_contexts(Address address,
     }
     result.instruction = &*it_instr->second;
     while (!contexts.empty()) {
-        auto const &context =
-            emplace_context(address, contexts.pop());
+        auto const &context = emplace_context(address, contexts.pop());
         auto new_context = context.make_child(Context::ParentRole::Default);
         emulate(address, *result.instruction, new_context);
         result.new_contexts.emplace(std::move(new_context));
@@ -308,13 +303,12 @@ void Flo::visit(Address address)
 Jump::Type Flo::get_jump_type(Address dst,
                               Address src,
                               Address next,
-                              bool unconditional,
-                              std::optional<Address> flo_end) const
+                              bool unconditional) const
 {
     // If we have end of flo,
     // we can easily check whether it is inner or outer jump
-    if (flo_end) {
-        if (dst >= entry_point && dst < flo_end) {
+    if (end) {
+        if (dst >= entry_point && dst < end) {
             return Jump::Inner;
         }
         return Jump::Outer;
@@ -365,10 +359,10 @@ bool Flo::stack_depth_is_ambiguous() const
     return stack_depth_ == -1;
 }
 
-bool Flo::is_inside(Address address, std::optional<Address> flo_end) const
+bool Flo::is_inside(Address address) const
 {
-    if (flo_end) {
-        return address >= entry_point && address < flo_end;
+    if (end) {
+        return address >= entry_point && address < end;
     }
     return disassembly_.contains(address) || inner_jumps_.contains(address);
 }

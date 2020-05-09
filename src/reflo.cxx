@@ -66,17 +66,12 @@ Instruction Reflo::decode_instruction(Address address, Address end)
 void Reflo::fill_flo(Flo &flo)
 {
     Address address = flo.entry_point;
-    Address end = pe_.get_end(address);
-    std::optional<Address> real_end_address;
-    auto runtime_function =
-        pe_.get_runtime_function(pe_.raw_to_virtual_address(flo.entry_point));
-    if (runtime_function && runtime_function->EndAddress) {
-        if (auto real_end =
-                pe_.virtual_to_raw_address(runtime_function->EndAddress);
-            real_end) {
-            end = real_end;
-            real_end_address = end;
-        }
+    Address end;
+    if (flo.end) {
+        end = *flo.end;
+    }
+    else {
+        end = pe_.get_end(address);
     }
     while (address && address < end) {
         auto instruction = decode_instruction(address, end);
@@ -87,8 +82,8 @@ void Reflo::fill_flo(Flo &flo)
                                 *instruction);
 #endif
         auto analysis_result =
-            flo.analyze(address, std::move(instruction), real_end_address);
-        if (!(analysis_result.status & Flo::Next) && !real_end_address) {
+            flo.analyze(address, std::move(instruction));
+        if (!(analysis_result.status & Flo::Next) && !flo.end) {
             break;
         }
         address = analysis_result.next_address;
@@ -99,6 +94,7 @@ void Reflo::fill_flo(Flo &flo)
 void Reflo::post_fill_flo(Flo &flo)
 {
     while (auto address = flo.get_unanalized_inner_jump_dst()) {
+        // TODO: use flo.end
         auto end = pe_.get_end(address);
         while (address && address < end) {
             auto instruction = decode_instruction(address, end);
@@ -147,7 +143,17 @@ void Reflo::run_flo_analysis(Address entry_point)
                       << '\n';
 #endif
 
-            auto flo = std::make_unique<Flo>(entry_point);
+            std::optional<Address> end;
+            auto runtime_function = pe_.get_runtime_function(
+                pe_.raw_to_virtual_address(entry_point));
+            if (runtime_function && runtime_function->EndAddress) {
+                if (auto real_end = pe_.virtual_to_raw_address(
+                        runtime_function->EndAddress);
+                    real_end) {
+                    end = real_end;
+                }
+            }
+            auto flo = std::make_unique<Flo>(entry_point, end);
             fill_flo(*flo);
 
             {
