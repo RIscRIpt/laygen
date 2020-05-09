@@ -81,8 +81,7 @@ void Reflo::fill_flo(Flo &flo)
                                 pe_.raw_to_virtual_address(address),
                                 *instruction);
 #endif
-        auto analysis_result =
-            flo.analyze(address, std::move(instruction));
+        auto analysis_result = flo.analyze(address, std::move(instruction));
         if (!(analysis_result.status & Flo::Next) && !flo.end) {
             break;
         }
@@ -94,8 +93,13 @@ void Reflo::fill_flo(Flo &flo)
 void Reflo::post_fill_flo(Flo &flo)
 {
     while (auto address = flo.get_unanalized_inner_jump_dst()) {
-        // TODO: use flo.end
-        auto end = pe_.get_end(address);
+        Address end;
+        if (flo.end) {
+            end = *flo.end;
+        }
+        else {
+            end = pe_.get_end(address);
+        }
         while (address && address < end) {
             auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_POST_ANALYSIS
@@ -105,7 +109,7 @@ void Reflo::post_fill_flo(Flo &flo)
                                     *instruction);
 #endif
             auto analysis_result = flo.analyze(address, std::move(instruction));
-            if (!(analysis_result.status & Flo::Next)) {
+            if (!(analysis_result.status & Flo::Next) && !flo.end) {
                 break;
             }
             address = analysis_result.next_address;
