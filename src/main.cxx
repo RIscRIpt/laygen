@@ -14,11 +14,7 @@ int wmain(int argc, wchar_t *argv[])
     try {
         rstc::Reflo reflo(argv[1]);
         rstc::Restruc restruc(reflo);
-#ifdef NDEBUG
-        reflo.set_max_analyzing_threads(128);
-        reflo.analyze();
-        restruc.analyze();
-#else
+
         reflo.set_max_analyzing_threads(128);
         std::cout << "Reflo::analyze ...\n";
         reflo.analyze();
@@ -29,7 +25,6 @@ int wmain(int argc, wchar_t *argv[])
         std::cout << "Restruc::analyze ...\n";
         restruc.analyze();
         restruc.debug(std::cout);
-#endif
     }
     catch (std::exception const &e) {
         std::cerr << e.what() << '\n';

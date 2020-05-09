@@ -313,8 +313,6 @@ void Reflo::set_max_analyzing_threads(size_t amount)
     max_analyzing_threads_ = amount;
 }
 
-#ifndef NDEBUG
-
 void Reflo::debug(std::ostream &os, DWORD va)
 {
     Dumper dumper;
@@ -332,5 +330,3 @@ void Reflo::debug(std::ostream &os, DWORD va)
         dumper.dump_flo(os, *flo, pe_.raw_to_virtual_address(flo->entry_point));
     }
 }
-
-#endif

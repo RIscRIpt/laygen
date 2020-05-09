@@ -23,9 +23,7 @@ namespace rstc {
         void analyze();
         void set_max_analyzing_threads(size_t amount);
 
-#ifndef NDEBUG
         void debug(std::ostream &os, DWORD va);
-#endif
 
         Flo *get_entry_flo();
         Flo *get_flo_by_address(Address address);

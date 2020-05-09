@@ -229,8 +229,6 @@ bool Restruc::operand_has_memory_access(ZydisDecodedOperand const &op)
            && op.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT;
 }
 
-#ifndef NDEBUG
-
 void Restruc::debug(std::ostream &os)
 {
     Dumper dumper;
@@ -245,6 +243,30 @@ void Restruc::debug(std::ostream &os)
                                      *instr,
                                      flo->get_contexts(address));
             os << "-----------------------------------------\n";
+        }
+    }
+}
+
+void Restruc::dump_register_history(std::ostream &os,
+                                    Dumper const &dumper,
+                                    Context const &context,
+                                    ZydisRegister reg,
+                                    std::unordered_set<Address> &visited)
+{
+    {
+        if (auto changed = context.get(reg); changed) {
+            auto flo = reflo_.get_flo_by_address(changed->source);
+            if (flo && !visited.contains(changed->source)) {
+                visited.emplace(changed->source);
+                dump_instruction_history(
+                    os,
+                    dumper,
+                    changed->source,
+                    *flo->get_disassembly().at(changed->source),
+                    flo->get_contexts(changed->source),
+                    visited);
+                os << "---\n";
+            }
         }
     }
 }
@@ -268,29 +290,30 @@ void Restruc::dump_instruction_history(
         for (auto context : contexts) {
             switch (op.type) {
             case ZYDIS_OPERAND_TYPE_REGISTER:
-                // Skip stack modification
-                if (op.reg.value == ZYDIS_REGISTER_RSP) {
-                    continue;
-                }
-                if (auto changed = context->get(op.reg.value); changed) {
-                    auto flo = reflo_.get_flo_by_address(changed->source);
-                    if (flo && !visited.contains(changed->source)) {
-                        visited.emplace(changed->source);
-                        dump_instruction_history(
-                            os,
-                            dumper,
-                            changed->source,
-                            *flo->get_disassembly().at(changed->source),
-                            flo->get_contexts(changed->source),
-                            visited);
-                        os << "---\n";
-                    }
-                }
+                dump_register_history(os,
+                                      dumper,
+                                      *context,
+                                      op.reg.value,
+                                      visited);
                 break;
+            case ZYDIS_OPERAND_TYPE_MEMORY:
+                if (op.mem.base != ZYDIS_REGISTER_NONE
+                    && op.mem.base != ZYDIS_REGISTER_RIP) {
+                    dump_register_history(os,
+                                          dumper,
+                                          *context,
+                                          op.mem.base,
+                                          visited);
+                }
+                if (op.mem.index != ZYDIS_REGISTER_NONE) {
+                    dump_register_history(os,
+                                          dumper,
+                                          *context,
+                                          op.mem.index,
+                                          visited);
+                }
             default: break;
             }
         }
     }
 }
-
-#endif
