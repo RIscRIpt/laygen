@@ -5,7 +5,7 @@ using namespace rstc;
 
 void Contexts::remove_multimap_duplicates(
     std::multimap<Address, Context> const &multimap,
-    Address const &value)
+    Address value)
 {
     Container result;
     auto to_remove = utils::multimap_values(multimap.equal_range(value));

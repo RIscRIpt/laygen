@@ -36,8 +36,8 @@ Restruc::Restruc(Reflo &reflo)
 
 void Restruc::analyze()
 {
-    if (auto ep = reflo_.get_entry_flo(); ep) {
-        propagate_contexts(ep->entry_point, make_initial_contexts());
+    if (auto ef = reflo_.get_entry_flo(); ef) {
+        propagate_contexts(ef->entry_point, make_initial_contexts());
     }
 }
 

@@ -28,7 +28,7 @@ namespace rstc {
 
         void remove_multimap_duplicates(
             std::multimap<Address, Context> const &multimap,
-            Address const &value);
+            Address value);
 
         inline auto begin() { return container_.begin(); }
         inline auto end() { return container_.end(); }
