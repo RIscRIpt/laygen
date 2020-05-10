@@ -34,6 +34,7 @@ namespace rstc {
         static bool
         instruction_has_memory_access(ZydisDecodedInstruction const &instr);
         static bool operand_has_memory_access(ZydisDecodedOperand const &op);
+        static bool is_history_term_instr(ZydisDecodedInstruction const &instr);
 
         void dump_register_history(std::ostream &os,
                                    Dumper const &dumper,

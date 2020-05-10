@@ -229,6 +229,19 @@ bool Restruc::operand_has_memory_access(ZydisDecodedOperand const &op)
            && op.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT;
 }
 
+bool Restruc::is_history_term_instr(ZydisDecodedInstruction const &instr)
+{
+    if (instr.mnemonic == ZYDIS_MNEMONIC_XOR) {
+        auto const &dst = instr.operands[0];
+        auto const &src = instr.operands[1];
+        if (dst.type == ZYDIS_OPERAND_TYPE_REGISTER
+            && src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+            return dst.reg.value == src.reg.value;
+        }
+    }
+    return false;
+}
+
 void Restruc::debug(std::ostream &os)
 {
     Dumper dumper;
@@ -237,6 +250,9 @@ void Restruc::debug(std::ostream &os)
             continue;
         }
         for (auto const &[address, instr] : flo->get_disassembly()) {
+            if (!instruction_has_memory_access(*instr)) {
+                continue;
+            }
             dump_instruction_history(os,
                                      dumper,
                                      address,
@@ -282,6 +298,9 @@ void Restruc::dump_instruction_history(
     visited.emplace(address);
     DWORD va = pe_.raw_to_virtual_address(address);
     dumper.dump_instruction(os, va, instr);
+    if (is_history_term_instr(instr)) {
+        return;
+    }
     for (size_t i = 0; i < instr.operand_count; i++) {
         auto const &op = instr.operands[i];
         if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
@@ -290,11 +309,13 @@ void Restruc::dump_instruction_history(
         for (auto context : contexts) {
             switch (op.type) {
             case ZYDIS_OPERAND_TYPE_REGISTER:
-                dump_register_history(os,
-                                      dumper,
-                                      *context,
-                                      op.reg.value,
-                                      visited);
+                if (op.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
+                    dump_register_history(os,
+                                          dumper,
+                                          *context,
+                                          op.reg.value,
+                                          visited);
+                }
                 break;
             case ZYDIS_OPERAND_TYPE_MEMORY:
                 if (op.mem.base != ZYDIS_REGISTER_NONE
