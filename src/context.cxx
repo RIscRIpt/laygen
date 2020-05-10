@@ -198,6 +198,13 @@ Context::Context(Context const *parent, ParentRole parent_role)
 std::optional<Context::ValueSource> Context::get(ZydisRegister reg) const
 {
     Context const *c = this;
+    if (auto it = REGISTER_PROMOTION_MAP.find(reg);
+        it != REGISTER_PROMOTION_MAP.end()) {
+        reg = it->second;
+    }
+    else if (!REGISTERS.contains(reg)) {
+        return std::nullopt;
+    }
     do {
         if (auto it = c->registers_.find(reg); it != c->registers_.end()) {
             return it->second;
