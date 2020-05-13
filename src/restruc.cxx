@@ -53,13 +53,13 @@ Contexts Restruc::propagate_contexts(Address address,
     bool new_basic_block = true;
     // Visit visited instructions without going deeper.
     while (address && !contexts.empty() && visited.count(address) < 2) {
+        DWORD va = pe_.raw_to_virtual_address(address);
         if (new_basic_block) {
             new_basic_block = false;
             flo->filter_contexts(address, contexts);
             if (contexts.empty()) {
                 break;
             }
-            flatten_contexts(contexts);
         }
         visited.emplace(address);
         auto propagation_result =
@@ -67,7 +67,6 @@ Contexts Restruc::propagate_contexts(Address address,
         contexts = std::move(propagation_result.new_contexts);
         auto const instr = propagation_result.instruction;
 #ifdef DEBUG_CONTEXT_PROPAGATION
-        DWORD va = pe_.raw_to_virtual_address(address);
         std::clog << std::dec << std::setfill(' ') << std::setw(8)
                   << visited.count(address) << '/' << std::setw(8)
                   << contexts.size() << ' ';
@@ -106,7 +105,7 @@ Contexts Restruc::propagate_contexts(Address address,
                 flo->get_jump_destinations(pe_, address, *instr, contexts);
             for (auto dst : dsts) {
                 auto child_contexts =
-                    make_child_contexts(contexts, Context::ParentRole::None);
+                    make_child_contexts(contexts, Context::ParentRole::Default);
                 auto next_contexts =
                     propagate_contexts(dst, std::move(child_contexts));
                 merge_contexts(return_contexts, std::move(next_contexts));
@@ -146,13 +145,6 @@ Contexts Restruc::make_initial_contexts()
     return contexts;
 }
 
-void Restruc::flatten_contexts(Contexts &contexts)
-{
-    auto new_contexts =
-        make_child_contexts(contexts, Context::ParentRole::None);
-    contexts = std::move(new_contexts);
-}
-
 Contexts Restruc::make_child_contexts(Contexts const &parents,
                                       Context::ParentRole parent_role)
 {
@@ -179,7 +171,7 @@ void Restruc::update_contexts_after_unknown_call(Contexts &contexts,
                    std::inserter(new_contexts, new_contexts.end()),
                    [caller](Context const &context) {
                        auto new_context =
-                           context.make_child(Context::ParentRole::None);
+                           context.make_child(Context::ParentRole::Default);
                        // Reset vlatile registers
                        for (auto volatile_register : VOLATILE_REGISTERS) {
                            new_context.set(volatile_register, caller);
@@ -199,7 +191,7 @@ void rstc::Restruc::set_contexts_after_call(Contexts &contexts,
         next_contexts.end(),
         std::inserter(reverted_contexts, reverted_contexts.end()),
         [&contexts](Context const &context) {
-            auto new_context = context.make_child(Context::ParentRole::None);
+            auto new_context = context.make_child(Context::ParentRole::Default);
             auto caller_context =
                 contexts.get_context_by_id(context.get_caller_id());
             if (caller_context) {

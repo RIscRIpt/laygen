@@ -1,15 +1,16 @@
-#include "virtual_memory.hxx"
+#include "memory.hxx"
 
 #include <algorithm>
 
 using namespace rstc;
+using namespace rstc::virt;
 
-VirtualMemory::VirtualMemory(Address source)
+Memory::Memory(Address source)
 {
     source_map_.emplace(0, source);
 }
 
-void VirtualMemory::assign(uintptr_t address, size_t size, Address source)
+void Memory::assign(uintptr_t address, size_t size, Address source)
 {
     auto key_begin = address;
     auto key_end = address + size;
@@ -37,7 +38,7 @@ void VirtualMemory::assign(uintptr_t address, size_t size, Address source)
     }
 }
 
-VirtualMemory::Sources VirtualMemory::get(uintptr_t address, size_t size) const
+Memory::Sources Memory::get(uintptr_t address, size_t size) const
 {
     auto source_next = source_map_.upper_bound(address);
     auto source_begin = std::prev(source_next);
@@ -65,12 +66,12 @@ VirtualMemory::Sources VirtualMemory::get(uintptr_t address, size_t size) const
     return sources;
 }
 
-VirtualMemory::Sources VirtualMemory::get_all() const
+Memory::Sources Memory::get_all() const
 {
     return get(0, source_map_.rbegin()->first);
 }
 
-Address VirtualMemory::get_root_source() const
+Address Memory::get_root_source() const
 {
     return source_map_.begin()->second;
 }

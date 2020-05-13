@@ -9,11 +9,11 @@ project(restruc
 find_package(zydis)
 find_package(zycore)
 
-file(GLOB SOURCE_FILES
-    "src/*.cxx"
-    "src/*.hxx"
-    "src/utils/*.cxx"
-    "src/utils/*.hxx"
+set(SOURCE_DIR "src")
+
+file(GLOB_RECURSE SOURCE_FILES
+    "${SOURCE_DIR}/*.cxx"
+    "${SOURCE_DIR}/*.hxx"
 )
 
 file(GLOB DUMMY_SOURCE_FILES
@@ -48,6 +48,7 @@ target_link_directories(
 
 target_include_directories(
     ${PROJECT_NAME} PRIVATE
+    ${SOURCE_DIR}
     ${zycore_INCLUDE_DIR}
     ${zydis_INCLUDE_DIR}
 )

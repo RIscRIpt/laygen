@@ -23,7 +23,6 @@ namespace rstc {
                            std::unordered_multiset<Address> visited = {});
         Contexts make_initial_contexts();
 
-        static void flatten_contexts(Contexts &contexts);
         static Contexts make_child_contexts(Contexts const &parents,
                                             Context::ParentRole parent_role);
         static void merge_contexts(Contexts &dst, Contexts contexts);

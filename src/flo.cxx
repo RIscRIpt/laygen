@@ -430,11 +430,11 @@ Address Flo::get_call_destination(Address address,
     }
 }
 
-std::pair<Context::Value, size_t>
+std::pair<std::optional<uintptr_t>, size_t>
 Flo::get_memory_address(ZydisDecodedOperand const &op, Context const &context)
 {
     assert(op.type == ZYDIS_OPERAND_TYPE_MEMORY);
-    Context::Value::value_type value = 0;
+    uintptr_t value = 0;
     if (op.mem.base != ZYDIS_REGISTER_NONE
         && op.mem.base != ZYDIS_REGISTER_RIP) {
         if (auto base = context.get(op.mem.base); base && base->value) {

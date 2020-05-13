@@ -106,7 +106,7 @@ namespace rstc {
         static Address
         get_call_destination(Address address,
                              ZydisDecodedInstruction const &instruction);
-        static std::pair<Context::Value, size_t>
+        static std::pair<std::optional<uintptr_t>, size_t>
         get_memory_address(ZydisDecodedOperand const &op,
                            Context const &context);
 

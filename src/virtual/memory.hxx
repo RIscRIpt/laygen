@@ -5,9 +5,9 @@
 #include <map>
 #include <vector>
 
-namespace rstc {
+namespace rstc::virt {
 
-    class VirtualMemory {
+    class Memory {
     public:
         struct Source {
             Source() = default;
@@ -23,7 +23,7 @@ namespace rstc {
         };
         using Sources = std::vector<Source>;
 
-        VirtualMemory(Address source);
+        Memory(Address source);
 
         void assign(uintptr_t address, size_t size, Address source);
         Sources get(uintptr_t address, size_t size) const;
