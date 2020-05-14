@@ -135,7 +135,6 @@ Contexts Restruc::make_initial_contexts()
     auto c = Context(ep);
     c.set(ZYDIS_REGISTER_RAX, ep, pe_.raw_to_virtual_address(ep));
     c.set(ZYDIS_REGISTER_RDX, *c.get(ZYDIS_REGISTER_RAX));
-    c.set(ZYDIS_REGISTER_RBP, ep, 0xFF10000000000000);
     c.set(ZYDIS_REGISTER_RSP, ep, 0xFF10000000000000);
     c.set(ZYDIS_REGISTER_R8, *c.get(ZYDIS_REGISTER_RCX));
     c.set(ZYDIS_REGISTER_R9, *c.get(ZYDIS_REGISTER_RAX));
