@@ -37,7 +37,7 @@ Context::Context(Context const *parent, ParentRole parent_role)
 {
 }
 
-std::optional<virt::Registers::ValueSource> Context::get(ZydisRegister reg) const
+Context::RegisterValueSource Context::get(ZydisRegister reg) const
 {
     return registers_.get(reg);
 }

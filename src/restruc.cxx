@@ -53,7 +53,6 @@ Contexts Restruc::propagate_contexts(Address address,
     bool new_basic_block = true;
     // Visit visited instructions without going deeper.
     while (address && !contexts.empty() && visited.count(address) < 2) {
-        DWORD va = pe_.raw_to_virtual_address(address);
         if (new_basic_block) {
             new_basic_block = false;
             flo->filter_contexts(address, contexts);
@@ -67,6 +66,7 @@ Contexts Restruc::propagate_contexts(Address address,
         contexts = std::move(propagation_result.new_contexts);
         auto const instr = propagation_result.instruction;
 #ifdef DEBUG_CONTEXT_PROPAGATION
+        DWORD va = pe_.raw_to_virtual_address(address);
         std::clog << std::dec << std::setfill(' ') << std::setw(8)
                   << visited.count(address) << '/' << std::setw(8)
                   << contexts.size() << ' ';
@@ -266,6 +266,9 @@ void Restruc::dump_register_history(std::ostream &os,
             auto flo = reflo_.get_flo_by_address(changed->source);
             if (flo && !visited.contains(changed->source)) {
                 visited.emplace(changed->source);
+                if (changed->value) {
+                    os << std::hex << *changed->value << '\t';
+                }
                 dump_instruction_history(
                     os,
                     dumper,

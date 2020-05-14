@@ -25,6 +25,9 @@ namespace rstc {
             Caller,
         };
 
+        using RegisterValue = virt::Registers::Value;
+        using RegisterValueSource = std::optional<virt::Registers::ValueSource>;
+
         Context() = delete;
         Context(Address source);
         Context(Context const *parent,
@@ -36,13 +39,12 @@ namespace rstc {
         Context &operator=(Context const &) = delete;
         Context &operator=(Context &&rhs) = default;
 
-        std::optional<virt::Registers::ValueSource>
-        get(ZydisRegister reg) const;
+        RegisterValueSource get(ZydisRegister reg) const;
         virt::Memory::Sources get(uintptr_t address, size_t size) const;
 
         void set(ZydisRegister reg,
                  Address source,
-                 virt::Registers::Value value = std::nullopt);
+                 RegisterValue value = std::nullopt);
         void set(ZydisRegister reg, virt::Registers::ValueSource valsrc);
         void set(uintptr_t address, size_t size, Address source);
 

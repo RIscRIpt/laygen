@@ -235,24 +235,133 @@ void Flo::emulate(Address address,
                   Context &context)
 {
     assert(address);
-    for (size_t i = 0; i < instruction.operand_count; i++) {
-        auto const &op = instruction.operands[i];
-        if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_WRITE)) {
-            continue;
-        }
-        switch (op.type) {
-        case ZYDIS_OPERAND_TYPE_REGISTER:
-            // TODO: analyze source, and set source value
-            context.set(op.reg.value, address);
-            break;
-        case ZYDIS_OPERAND_TYPE_MEMORY:
-            if (auto [value, size] = get_memory_address(op, context); value) {
-                context.set(*value, size, address);
+    switch (instruction.mnemonic) {
+    case ZYDIS_MNEMONIC_MOV: {
+        emulate_instruction(instruction,
+                            context,
+                            address,
+                            [](Context::RegisterValue &dst,
+                               Context::RegisterValue src) { dst = src; });
+    } break;
+    case ZYDIS_MNEMONIC_ADD: {
+        emulate_instruction(
+            instruction,
+            context,
+            address,
+            [](Context::RegisterValue &dst, Context::RegisterValue src) {
+                if (dst && src) {
+                    *dst += *src;
+                }
+                else {
+                    dst = std::nullopt;
+                }
+            });
+    } break;
+    case ZYDIS_MNEMONIC_SUB: {
+        emulate_instruction(
+            instruction,
+            context,
+            address,
+            [](Context::RegisterValue &dst, Context::RegisterValue src) {
+                if (dst && src) {
+                    *dst -= *src;
+                }
+                else {
+                    dst = std::nullopt;
+                }
+            });
+    } break;
+    default:
+        for (size_t i = 0; i < instruction.operand_count; i++) {
+            auto const &op = instruction.operands[i];
+            if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_WRITE)) {
+                continue;
             }
-            break;
-        default: break;
+            switch (op.type) {
+            case ZYDIS_OPERAND_TYPE_REGISTER:
+                // TODO: analyze source, and set source value
+                context.set(op.reg.value, address);
+                break;
+            case ZYDIS_OPERAND_TYPE_MEMORY:
+                if (auto [value, size] = get_memory_address(op, context);
+                    value) {
+                    context.set(*value, size, address);
+                }
+                break;
+            default: break;
+            }
+        }
+        break;
+    }
+}
+
+void Flo::emulate_instruction(
+    ZydisDecodedInstruction const &instruction,
+    Context &context,
+    Address address,
+    std::function<void(Context::RegisterValue &, Context::RegisterValue)>
+        callback)
+{
+    auto const &dst = instruction.operands[0];
+    auto op_dst = get_operand(dst, context);
+    Context::RegisterValue src_value;
+    if (instruction.operand_count >= 2) {
+        auto const &src = instruction.operands[1];
+        auto op_src = get_operand(src, context);
+        src_value = get_operand_value(op_src);
+    }
+    if (std::holds_alternative<OperandRegister>(op_dst)) {
+        auto &dst_reg = std::get<OperandRegister>(op_dst);
+        callback(dst_reg.value, src_value);
+        context.set(dst_reg.reg, address, dst_reg.value);
+    }
+    else if (std::holds_alternative<OperandMemory>(op_dst)) {
+        auto &dst_mem = std::get<OperandMemory>(op_dst);
+        if (dst_mem.address) {
+            // TODO: set value from op_src
+            callback(dst_mem.value, src_value);
+            context.set(*dst_mem.address, dst_mem.size, address);
         }
     }
+}
+
+Flo::Operand Flo::get_operand(ZydisDecodedOperand const &operand,
+                              Context const &context)
+{
+    switch (operand.type) {
+    case ZYDIS_OPERAND_TYPE_REGISTER: {
+        OperandRegister op;
+        op.reg = operand.reg.value;
+        if (auto valsrc = context.get(operand.reg.value); valsrc) {
+            op.value = valsrc->value;
+        }
+        op.size = 8; // TODO: calculate register size
+        return op;
+    } break;
+    case ZYDIS_OPERAND_TYPE_MEMORY: {
+        OperandMemory op;
+        auto [address, size] = get_memory_address(operand, context);
+        op.address = address;
+        if (address) {
+            // TODO: get value
+        }
+        op.size = size;
+        return op;
+    } break;
+    default: break;
+    }
+    return std::monostate();
+}
+
+Context::RegisterValue Flo::get_operand_value(Operand const &operand)
+{
+    if (std::holds_alternative<OperandRegister>(operand)) {
+        return std::get<OperandRegister>(operand).value;
+    }
+    else if (std::holds_alternative<OperandMemory>(operand)) {
+        return std::get<OperandMemory>(operand).value;
+    }
+    return std::nullopt;
 }
 
 ZydisDecodedInstruction const *Flo::get_instruction(Address address) const

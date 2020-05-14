@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <variant>
 
 namespace rstc {
 
@@ -131,6 +132,18 @@ namespace rstc {
         std::optional<Address> const end;
 
     private:
+        struct OperandRegister {
+            Context::RegisterValue value;
+            int size;
+            ZydisRegister reg;
+        };
+        struct OperandMemory {
+            Context::RegisterValue value;
+            Context::RegisterValue address;
+            int size;
+        };
+        using Operand = std::variant<std::monostate, OperandRegister, OperandMemory>;
+
         bool is_inside(Address address) const;
         Jump::Type get_jump_type(Address dst,
                                  Address src,
@@ -146,6 +159,14 @@ namespace rstc {
         static void emulate(Address address,
                             ZydisDecodedInstruction const &instruction,
                             Context &context);
+        static void emulate_instruction(
+            ZydisDecodedInstruction const &instruction,
+            Context &context,
+            Address address,
+            std::function<void(Context::RegisterValue&, Context::RegisterValue)> callback);
+        static Operand get_operand(ZydisDecodedOperand const &operand,
+                                   Context const &context);
+        static Context::RegisterValue get_operand_value(Operand const &operand);
 
         bool stack_depth_is_ambiguous() const;
 
