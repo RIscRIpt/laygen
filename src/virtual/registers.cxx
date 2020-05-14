@@ -270,8 +270,8 @@ void Registers::set(ZydisRegister zydis_reg, ValueSource valsrc)
             new_tree->r = tree->r;
             if (begin < end - 1) {
                 new_tree->l = std::make_shared<Holder>();
-                tree = std::static_pointer_cast<Holder>(tree->l);
                 new_tree = std::static_pointer_cast<Holder>(new_tree->l);
+                tree = std::static_pointer_cast<Holder>(tree->l);
             }
             else {
                 new_tree->l = std::make_shared<ValueSource>(valsrc);
@@ -283,8 +283,8 @@ void Registers::set(ZydisRegister zydis_reg, ValueSource valsrc)
             new_tree->l = tree->l;
             if (begin < end - 1) {
                 new_tree->r = std::make_shared<Holder>();
-                tree = std::static_pointer_cast<Holder>(tree->r);
                 new_tree = std::static_pointer_cast<Holder>(new_tree->r);
+                tree = std::static_pointer_cast<Holder>(tree->r);
             }
             else {
                 new_tree->r = std::make_shared<ValueSource>(valsrc);
