@@ -318,9 +318,9 @@ void Flo::emulate_instruction(
     else if (std::holds_alternative<OperandMemory>(op_dst)) {
         auto &dst_mem = std::get<OperandMemory>(op_dst);
         if (dst_mem.address) {
-            // TODO: set value from op_src
             callback(dst_mem.value, src_value);
-            context.set(*dst_mem.address, dst_mem.size, address);
+            // TODO: use dst_mem.size
+            context.set(*dst_mem.address, address, dst_mem.value);
         }
     }
 }
@@ -343,7 +343,7 @@ Flo::Operand Flo::get_operand(ZydisDecodedOperand const &operand,
         auto [address, size] = get_memory_address(operand, context);
         op.address = address;
         if (address) {
-            // TODO: get value
+            op.value = context.get(*address, size);
         }
         op.size = size;
         return op;

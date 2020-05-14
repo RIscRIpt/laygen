@@ -33,7 +33,7 @@ Context::Context(Context const *parent, ParentRole parent_role)
     , caller_id_(parent_role == ParentRole::Caller ? parent->id_ :
                                                      parent->caller_id_)
     , registers_(&parent->registers_)
-    , memory_(parent->memory_.get_root_source())
+    , memory_(&parent->memory_)
 {
 }
 
@@ -42,12 +42,12 @@ Context::RegisterValueSource Context::get(ZydisRegister reg) const
     return registers_.get(reg);
 }
 
-virt::Memory::Sources Context::get(uintptr_t address, size_t size) const
+Context::MemoryValues Context::get(uintptr_t address, size_t size) const
 {
     return memory_.get(address, size);
 }
 
-void Context::set(ZydisRegister reg, Address source, virt::Registers::Value value)
+void Context::set(ZydisRegister reg, Address source, Context::RegisterValue value)
 {
     set(reg, virt::Registers::ValueSource{ value, source });
 }
@@ -78,13 +78,19 @@ void Context::set(ZydisRegister reg, virt::Registers::ValueSource valsrc)
 void Context::set_all_registers_zero(Address source)
 {
     for (auto const &[zydis_reg, reg] : virt::Registers::register_map) {
-        set(zydis_reg, source, {});
+        set(zydis_reg, source, 0);
     }
 }
 
 void Context::set(uintptr_t address, size_t size, Address source)
 {
-    memory_.assign(address, size, source);
+    std::vector<Byte> bytes(size);
+    memory_.set(address, source, bytes);
+}
+
+void Context::set(uintptr_t address, Address source, RegisterValue value)
+{
+    memory_.set(address, source, value);
 }
 
 Context Context::make_child(ParentRole parent_role) const

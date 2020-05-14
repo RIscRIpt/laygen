@@ -138,7 +138,7 @@ Contexts Restruc::make_initial_contexts()
     c.set(ZYDIS_REGISTER_RSP, ep, 0xFF10000000000000);
     c.set(ZYDIS_REGISTER_R8, *c.get(ZYDIS_REGISTER_RCX));
     c.set(ZYDIS_REGISTER_R9, *c.get(ZYDIS_REGISTER_RAX));
-    c.set(ZYDIS_REGISTER_RFLAGS, 0x244, ep);
+    c.set(ZYDIS_REGISTER_RFLAGS, ep, 0x244);
     Contexts contexts;
     contexts.emplace(std::move(c));
     return contexts;
