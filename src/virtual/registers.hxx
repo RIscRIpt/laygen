@@ -91,11 +91,6 @@ namespace rstc::virt {
             }
         };
 
-        struct Holder {
-            std::shared_ptr<void> l = nullptr;
-            std::shared_ptr<void> r = nullptr;
-        };
-
         Registers(Registers const *parent = nullptr);
 
         Registers(Registers const &) = delete;
@@ -113,6 +108,11 @@ namespace rstc::virt {
             register_map;
 
     private:
+        struct Holder {
+            std::shared_ptr<void> l = nullptr;
+            std::shared_ptr<void> r = nullptr;
+        };
+
         void initialize_holder(Holder &holder, size_t begin, size_t end);
 
         std::shared_ptr<void> holder_;
