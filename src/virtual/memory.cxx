@@ -73,9 +73,6 @@ void Memory::set(uintptr_t address,
                 new_tree->r = tree->r;
                 tree = std::static_pointer_cast<Holder>(tree->l);
             }
-            if (!new_tree->r) {
-                new_tree->r = std::make_shared<Holder>();
-            }
             new_tree = std::static_pointer_cast<Holder>(new_tree->l);
         }
         else if (address >= middle && address_end >= middle) {
@@ -85,9 +82,6 @@ void Memory::set(uintptr_t address,
                 new_tree->l = tree->l;
                 tree = std::static_pointer_cast<Holder>(tree->r);
             }
-            if (!new_tree->l) {
-                new_tree->l = std::make_shared<Holder>();
-            }
             new_tree = std::static_pointer_cast<Holder>(new_tree->r);
         }
         else {
@@ -96,7 +90,8 @@ void Memory::set(uintptr_t address,
     }
     for (uintptr_t i = address; i != address_end; i++) {
         uintptr_t index = i - address;
-        set_value(tree, new_tree, begin, end, i, source, bytes[i]);
+        set_value(tree, new_tree, begin, end, i, source, bytes[index]);
+        tree = new_tree;
     }
 }
 
@@ -116,11 +111,11 @@ void Memory::set_value(std::shared_ptr<Holder> tree,
                 new_tree->r = tree->r;
             }
             if (begin < end - 1) {
-                new_tree->l = std::make_shared<Holder>();
-                new_tree = std::static_pointer_cast<Holder>(new_tree->l);
                 if (tree) {
                     tree = std::static_pointer_cast<Holder>(tree->l);
                 }
+                new_tree->l = std::make_shared<Holder>();
+                new_tree = std::static_pointer_cast<Holder>(new_tree->l);
             }
             else {
                 new_tree->l = std::make_shared<Value>(source, byte);
@@ -133,11 +128,11 @@ void Memory::set_value(std::shared_ptr<Holder> tree,
                 new_tree->l = tree->l;
             }
             if (begin < end - 1) {
-                new_tree->r = std::make_shared<Holder>();
-                new_tree = std::static_pointer_cast<Holder>(new_tree->r);
                 if (tree) {
                     tree = std::static_pointer_cast<Holder>(tree->r);
                 }
+                new_tree->r = std::make_shared<Holder>();
+                new_tree = std::static_pointer_cast<Holder>(new_tree->r);
             }
             else {
                 new_tree->r = std::make_shared<Value>(source, byte);
