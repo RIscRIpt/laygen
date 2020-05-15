@@ -36,7 +36,10 @@ namespace rstc::virt {
         Memory &operator=(Memory const &) = delete;
         Memory &operator=(Memory &&rhs) = default;
 
-        void set(uintptr_t address, Address source, Registers::Value value);
+        void set(uintptr_t address,
+                 Address source,
+                 Registers::Value value,
+                 size_t size);
         void
         set(uintptr_t address, Address source, std::vector<Byte> const &bytes);
         Values get(uintptr_t address, size_t size) const;

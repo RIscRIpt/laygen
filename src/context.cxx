@@ -37,27 +37,30 @@ Context::Context(Context const *parent, ParentRole parent_role)
 {
 }
 
-Context::RegisterValueSource Context::get(ZydisRegister reg) const
+Context::RegisterValueSource Context::get_register(ZydisRegister reg) const
 {
     return registers_.get(reg);
 }
 
-Context::MemoryValues Context::get(uintptr_t address, size_t size) const
+Context::MemoryValues Context::get_memory(uintptr_t address, size_t size) const
 {
     return memory_.get(address, size);
 }
 
-void Context::set(ZydisRegister reg, Address source, Context::RegisterValue value)
+void Context::set_register(ZydisRegister reg,
+                           Address source,
+                           Context::RegisterValue value)
 {
-    set(reg, virt::Registers::ValueSource{ value, source });
+    set_register(reg, virt::Registers::ValueSource{ value, source });
 }
 
-void Context::set(ZydisRegister reg, virt::Registers::ValueSource valsrc)
+void Context::set_register(ZydisRegister reg,
+                           virt::Registers::ValueSource valsrc)
 {
     if (!registers_.is_tracked(reg)) {
         return;
     }
-    if (auto old = get(reg); old) {
+    if (auto old = get_register(reg); old) {
         hash_combine(hash_, old->source);
         if (old->value) {
             hash_combine(hash_, *old->value);
@@ -78,19 +81,16 @@ void Context::set(ZydisRegister reg, virt::Registers::ValueSource valsrc)
 void Context::set_all_registers_zero(Address source)
 {
     for (auto const &[zydis_reg, reg] : virt::Registers::register_map) {
-        set(zydis_reg, source, 0);
+        set_register(zydis_reg, source, 0);
     }
 }
 
-void Context::set(uintptr_t address, size_t size, Address source)
+void Context::set_memory(uintptr_t address,
+                         Address source,
+                         RegisterValue value,
+                         size_t size)
 {
-    std::vector<Byte> bytes(size);
-    memory_.set(address, source, bytes);
-}
-
-void Context::set(uintptr_t address, Address source, RegisterValue value)
-{
-    memory_.set(address, source, value);
+    memory_.set(address, source, value, size);
 }
 
 Context Context::make_child(ParentRole parent_role) const

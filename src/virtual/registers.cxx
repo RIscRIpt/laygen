@@ -245,6 +245,7 @@ Registers::get(ZydisRegister zydis_reg) const
     return std::nullopt;
 }
 
+// TODO: use register size
 void Registers::set(ZydisRegister zydis_reg, ValueSource valsrc)
 {
     if (auto it = reg_promotion_map_.find(zydis_reg);

@@ -8,7 +8,7 @@
 
 using namespace rstc;
 
-// #define DEBUG_CONTEXT_PROPAGATION
+#define DEBUG_CONTEXT_PROPAGATION
 
 static ZydisRegister const VOLATILE_REGISTERS[] = {
     ZYDIS_REGISTER_RAX,  ZYDIS_REGISTER_RCX,  ZYDIS_REGISTER_RDX,
@@ -27,6 +27,27 @@ static ZydisRegister const NONVOLATILE_REGISTERS[] = {
     ZYDIS_REGISTER_ZMM12, ZYDIS_REGISTER_ZMM13, ZYDIS_REGISTER_ZMM14,
     ZYDIS_REGISTER_ZMM15,
 };
+
+#ifdef DEBUG_CONTEXT_PROPAGATION
+
+void dump_register_value(std::ostream &os,
+                         Dumper const &dumper,
+                         Reflo &reflo,
+                         Context const &context,
+                         ZydisRegister reg)
+{
+    if (auto changed = context.get_register(reg); changed) {
+        auto flo = reflo.get_flo_by_address(changed->source);
+        if (flo) {
+            if (changed->value) {
+                os << std::setfill('0') << std::hex << std::setw(16)
+                   << *changed->value << '\t';
+            }
+        }
+    }
+}
+
+#endif
 
 Restruc::Restruc(Reflo &reflo)
     : reflo_(reflo)
@@ -53,6 +74,7 @@ Contexts Restruc::propagate_contexts(Address address,
     bool new_basic_block = true;
     // Visit visited instructions without going deeper.
     while (address && !contexts.empty() && visited.count(address) < 2) {
+        DWORD va = pe_.raw_to_virtual_address(address);
         if (new_basic_block) {
             new_basic_block = false;
             flo->filter_contexts(address, contexts);
@@ -66,12 +88,48 @@ Contexts Restruc::propagate_contexts(Address address,
         contexts = std::move(propagation_result.new_contexts);
         auto const instr = propagation_result.instruction;
 #ifdef DEBUG_CONTEXT_PROPAGATION
-        DWORD va = pe_.raw_to_virtual_address(address);
         std::clog << std::dec << std::setfill(' ') << std::setw(8)
                   << visited.count(address) << '/' << std::setw(8)
                   << contexts.size() << ' ';
         if (instr) {
             Dumper dumper;
+            for (size_t i = 0; i < instr->operand_count; i++) {
+                auto const &op = instr->operands[i];
+                if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
+                    continue;
+                }
+                for (auto const &context : contexts) {
+                    switch (op.type) {
+                    case ZYDIS_OPERAND_TYPE_REGISTER:
+                        if (op.visibility
+                            == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
+                            dump_register_value(std::clog,
+                                                dumper,
+                                                reflo_,
+                                                context,
+                                                op.reg.value);
+                        }
+                        break;
+                    case ZYDIS_OPERAND_TYPE_MEMORY:
+                        if (op.mem.base != ZYDIS_REGISTER_NONE
+                            && op.mem.base != ZYDIS_REGISTER_RIP) {
+                            dump_register_value(std::clog,
+                                                dumper,
+                                                reflo_,
+                                                context,
+                                                op.mem.base);
+                        }
+                        if (op.mem.index != ZYDIS_REGISTER_NONE) {
+                            dump_register_value(std::clog,
+                                                dumper,
+                                                reflo_,
+                                                context,
+                                                op.mem.index);
+                        }
+                    default: break;
+                    }
+                }
+            }
             dumper.dump_instruction(std::clog, va, *instr);
         }
         else {
@@ -133,12 +191,12 @@ Contexts Restruc::make_initial_contexts()
 {
     auto ep = reflo_.get_pe().get_entry_point();
     auto c = Context(ep);
-    c.set(ZYDIS_REGISTER_RAX, ep, pe_.raw_to_virtual_address(ep));
-    c.set(ZYDIS_REGISTER_RDX, *c.get(ZYDIS_REGISTER_RAX));
-    c.set(ZYDIS_REGISTER_RSP, ep, 0xFF10000000000000);
-    c.set(ZYDIS_REGISTER_R8, *c.get(ZYDIS_REGISTER_RCX));
-    c.set(ZYDIS_REGISTER_R9, *c.get(ZYDIS_REGISTER_RAX));
-    c.set(ZYDIS_REGISTER_RFLAGS, ep, 0x244);
+    c.set_register(ZYDIS_REGISTER_RAX, ep, pe_.raw_to_virtual_address(ep));
+    c.set_register(ZYDIS_REGISTER_RDX, *c.get_register(ZYDIS_REGISTER_RAX));
+    c.set_register(ZYDIS_REGISTER_RSP, ep, 0xFF10000000000000);
+    c.set_register(ZYDIS_REGISTER_R8, *c.get_register(ZYDIS_REGISTER_RCX));
+    c.set_register(ZYDIS_REGISTER_R9, *c.get_register(ZYDIS_REGISTER_RAX));
+    c.set_register(ZYDIS_REGISTER_RFLAGS, ep, 0x244);
     Contexts contexts;
     contexts.emplace(std::move(c));
     return contexts;
@@ -173,7 +231,7 @@ void Restruc::update_contexts_after_unknown_call(Contexts &contexts,
                            context.make_child(Context::ParentRole::Default);
                        // Reset vlatile registers
                        for (auto volatile_register : VOLATILE_REGISTERS) {
-                           new_context.set(volatile_register, caller);
+                           new_context.set_register(volatile_register, caller);
                        }
                        return new_context;
                    });
@@ -195,9 +253,10 @@ void rstc::Restruc::set_contexts_after_call(Contexts &contexts,
                 contexts.get_context_by_id(context.get_caller_id());
             if (caller_context) {
                 for (auto nonvolatile_register : NONVOLATILE_REGISTERS) {
-                    if (auto valsrc = caller_context->get(nonvolatile_register);
+                    if (auto valsrc =
+                            caller_context->get_register(nonvolatile_register);
                         valsrc) {
-                        new_context.set(nonvolatile_register, *valsrc);
+                        new_context.set_register(nonvolatile_register, *valsrc);
                     }
                 }
             }
@@ -261,7 +320,7 @@ void Restruc::dump_register_history(std::ostream &os,
                                     std::unordered_set<Address> &visited)
 {
     {
-        if (auto changed = context.get(reg); changed) {
+        if (auto changed = context.get_register(reg); changed) {
             auto flo = reflo_.get_flo_by_address(changed->source);
             if (flo && !visited.contains(changed->source)) {
                 visited.emplace(changed->source);
@@ -300,7 +359,7 @@ void Restruc::dump_instruction_history(
         if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
             continue;
         }
-        for (auto context : contexts) {
+        for (auto const &context : contexts) {
             switch (op.type) {
             case ZYDIS_OPERAND_TYPE_REGISTER:
                 if (op.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {

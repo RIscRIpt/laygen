@@ -38,8 +38,10 @@ namespace rstc {
         inline auto size() const { return container_.size(); }
         inline auto pop()
         {
-            return std::move(
+            auto result = std::move(
                 container_.extract(std::prev(container_.end())).value());
+            context_by_id_.erase(result.get_id());
+            return result;
         }
         inline auto insert(iterator where, Context &&context)
         {
@@ -55,7 +57,10 @@ namespace rstc {
             }
             return std::make_pair(it, inserted);
         }
-        inline auto emplace(Context &&context) { return insert(std::move(context)); }
+        inline auto emplace(Context &&context)
+        {
+            return insert(std::move(context));
+        }
         inline void merge(Contexts &&contexts)
         {
             container_.merge(std::move(contexts.container_));

@@ -19,12 +19,25 @@ Memory::Values::Values(size_t size, Address default_source)
 
 Memory::Values::operator Registers::Value() const
 {
-    if (bytes.size() < sizeof(Registers::Value::value_type)) {
-        // TODO: use sources
-        return {};
-    }
+    switch (bytes.size()) {
+    case 1: return bytes.front();
+
     // MSVC (un)defined behaviour
-    return *reinterpret_cast<Registers::Value::value_type const*>(bytes.data());
+    case 2: return *reinterpret_cast<uint16_t const *>(bytes.data());
+    case 4: return *reinterpret_cast<uint32_t const *>(bytes.data());
+    case 8: return *reinterpret_cast<uint64_t const *>(bytes.data());
+
+    default:
+        if (bytes.size() < 8) {
+            uintptr_t value = 0;
+            for (auto it = bytes.rbegin(); it != bytes.rend(); ++it) {
+                value <<= 8;
+                value |= *it;
+            }
+            return value;
+        }
+    }
+    return std::nullopt;
 }
 
 Memory::Memory(Address source)
@@ -39,13 +52,15 @@ Memory::Memory(Memory const *parent)
 {
 }
 
-void Memory::set(uintptr_t address, Address source, Registers::Value value)
+void Memory::set(uintptr_t address,
+                 Address source,
+                 Registers::Value value,
+                 size_t size)
 {
-    std::vector<Byte> bytes;
+    std::vector<Byte> bytes(size);
     if (value) {
-        bytes.resize(sizeof(*value));
         std::copy(reinterpret_cast<Byte *>(&*value),
-                  reinterpret_cast<Byte *>(&*value) + sizeof(*value),
+                  reinterpret_cast<Byte *>(&*value) + size,
                   bytes.begin());
     }
     set(address, source, bytes);
