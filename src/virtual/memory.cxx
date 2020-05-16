@@ -6,8 +6,8 @@ using namespace rstc;
 using namespace rstc::virt;
 
 Memory::Value::Value(Address source, Byte byte)
-    : byte(byte)
-    , source(source)
+    : source(source)
+    , byte(byte)
 {
 }
 
