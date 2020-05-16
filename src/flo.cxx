@@ -20,8 +20,9 @@ std::unordered_map<ZydisMnemonic, Flo::EmulationCallbackAction2OP>
           [](uintptr_t dst, uintptr_t src) { return dst ^ src; } },
     };
 
-Flo::Flo(Address entry_point, std::optional<Address> end)
-    : entry_point(entry_point)
+Flo::Flo(PE const &pe, Address entry_point, std::optional<Address> end)
+    : pe_(pe)
+    , entry_point(entry_point)
     , end(end)
 {
 }
@@ -264,7 +265,10 @@ void Flo::emulate(Address address,
                             [](Context::RegisterValue &dst,
                                Context::RegisterValue const &src,
                                int size) {
-                                auto mask = (1 << size) - 1;
+                                uintptr_t mask = ~0;
+                                if (size < 64) {
+                                    mask = (1ULL << size) - 1;
+                                }
                                 if (dst && src && size < 32) {
                                     dst = (*dst & ~mask) | (*src & mask);
                                 }
@@ -291,6 +295,18 @@ void Flo::emulate(Address address,
                                       _3,
                                       action));
     } break;
+    case ZYDIS_MNEMONIC_PUSH:
+        emulate_instruction_push(instruction, context, address);
+        break;
+    case ZYDIS_MNEMONIC_POP:
+        emulate_instruction_pop(instruction, context, address);
+        break;
+    case ZYDIS_MNEMONIC_CALL:
+        emulate_instruction_call(instruction, context, address);
+        break;
+    case ZYDIS_MNEMONIC_RET:
+        emulate_instruction_ret(instruction, context, address);
+        break;
     default:
         for (size_t i = 0; i < instruction.operand_count; i++) {
             auto const &op = instruction.operands[i];
@@ -348,7 +364,69 @@ void Flo::emulate_instruction(ZydisDecodedInstruction const &instruction,
         context.set_register(dst.reg, address, dst.value);
     }
     else if (dst.address) {
-        context.set_memory(*dst.address, address, dst.value, dst.size);
+        context.set_memory(*dst.address, address, dst.value, dst.size / 8);
+    }
+}
+
+void Flo::emulate_instruction_push(
+    ZydisDecodedInstruction const &instruction,
+    Context &context,
+    Address address)
+{
+    assert(instruction.mnemonic == ZYDIS_MNEMONIC_PUSH);
+    if (auto rsp = context.get_register(ZYDIS_REGISTER_RSP);
+        rsp && rsp->value) {
+        auto new_rsp = *rsp->value - 8;
+        auto op = get_operand(instruction.operands[0], context);
+        context.set_register(ZYDIS_REGISTER_RSP, address, new_rsp);
+        context.set_memory(new_rsp, address, op.value, op.size / 8);
+    }
+}
+
+void Flo::emulate_instruction_pop(
+    ZydisDecodedInstruction const &instruction,
+    Context &context,
+    Address address)
+{
+    assert(instruction.mnemonic == ZYDIS_MNEMONIC_POP);
+    if (auto rsp = context.get_register(ZYDIS_REGISTER_RSP);
+        rsp && rsp->value) {
+        auto new_rsp = *rsp->value + 8;
+        context.set_register(ZYDIS_REGISTER_RSP, address, new_rsp);
+        auto op = get_operand(instruction.operands[0], context);
+        if (op.reg != ZYDIS_REGISTER_NONE) {
+            context.set_register(op.reg, address, op.value);
+        }
+        else if (op.address) {
+            context.set_memory(*op.address, address, op.value, op.size / 8);
+        }
+    }
+}
+
+void Flo::emulate_instruction_call(ZydisDecodedInstruction const &instruction,
+                                   Context &context,
+                                   Address address)
+{
+    assert(instruction.mnemonic == ZYDIS_MNEMONIC_CALL);
+    if (auto rsp = context.get_register(ZYDIS_REGISTER_RSP);
+        rsp && rsp->value) {
+        auto new_rsp = *rsp->value - 8;
+        auto return_address =
+            pe_.raw_to_virtual_address(address + instruction.length);
+        context.set_memory(new_rsp, address, return_address);
+        context.set_register(ZYDIS_REGISTER_RSP, address, new_rsp);
+    }
+}
+
+void Flo::emulate_instruction_ret(ZydisDecodedInstruction const &instruction,
+                                  Context &context,
+                                  Address address)
+{
+    assert(instruction.mnemonic == ZYDIS_MNEMONIC_RET);
+    if (auto rsp = context.get_register(ZYDIS_REGISTER_RSP);
+        rsp && rsp->value) {
+        auto new_rsp = *rsp->value + 8;
+        context.set_register(ZYDIS_REGISTER_RSP, address, new_rsp);
     }
 }
 
@@ -394,7 +472,7 @@ Flo::Operand Flo::get_operand(ZydisDecodedOperand const &operand,
     case ZYDIS_OPERAND_TYPE_MEMORY: {
         op.address = get_memory_address(operand, context);
         if (op.address) {
-            op.value = context.get_memory(*op.address, op.size);
+            op.value = context.get_memory(*op.address, op.size / 8);
         }
     } break;
     default: break;
@@ -584,7 +662,8 @@ std::optional<uintptr_t> Flo::get_memory_address(ZydisDecodedOperand const &op,
     uintptr_t value = 0;
     if (op.mem.base != ZYDIS_REGISTER_NONE
         && op.mem.base != ZYDIS_REGISTER_RIP) {
-        if (auto base = context.get_register(op.mem.base); base && base->value) {
+        if (auto base = context.get_register(op.mem.base);
+            base && base->value) {
             value += *base->value;
         }
         else {
@@ -595,7 +674,8 @@ std::optional<uintptr_t> Flo::get_memory_address(ZydisDecodedOperand const &op,
         value += op.mem.disp.value;
     }
     if (op.mem.index != ZYDIS_REGISTER_NONE) {
-        if (auto index = context.get_register(op.mem.index); index && index->value) {
+        if (auto index = context.get_register(op.mem.index);
+            index && index->value) {
             value += *index->value * op.mem.scale;
         }
         else {

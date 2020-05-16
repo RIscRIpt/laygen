@@ -157,7 +157,7 @@ void Reflo::run_flo_analysis(Address entry_point)
                     end = real_end;
                 }
             }
-            auto flo = std::make_unique<Flo>(entry_point, end);
+            auto flo = std::make_unique<Flo>(pe_, entry_point, end);
             fill_flo(*flo);
 
             {

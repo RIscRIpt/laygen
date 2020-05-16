@@ -64,7 +64,7 @@ void Restruc::analyze()
 
 Contexts Restruc::propagate_contexts(Address address,
                                      Contexts contexts,
-                                     std::unordered_multiset<Address> visited)
+                                     std::unordered_map<Address, size_t> visited)
 {
     Flo *flo = reflo_.get_flo_by_address(address);
     if (!flo) {
@@ -73,8 +73,10 @@ Contexts Restruc::propagate_contexts(Address address,
     Contexts return_contexts;
     bool new_basic_block = true;
     // Visit visited instructions without going deeper.
-    while (address && !contexts.empty() && visited.count(address) < 2) {
+    while (address && !contexts.empty() && visited[address] < 2) {
+#ifdef DEBUG_CONTEXT_PROPAGATION
         DWORD va = pe_.raw_to_virtual_address(address);
+#endif
         if (new_basic_block) {
             new_basic_block = false;
             flo->filter_contexts(address, contexts);
@@ -82,14 +84,14 @@ Contexts Restruc::propagate_contexts(Address address,
                 break;
             }
         }
-        visited.emplace(address);
+        visited[address]++;
         auto propagation_result =
             flo->propagate_contexts(address, std::move(contexts));
         contexts = std::move(propagation_result.new_contexts);
         auto const instr = propagation_result.instruction;
 #ifdef DEBUG_CONTEXT_PROPAGATION
         std::clog << std::dec << std::setfill(' ') << std::setw(8)
-                  << visited.count(address) << '/' << std::setw(8)
+                  << visited[address] << '/' << std::setw(8)
                   << contexts.size() << ' ';
         if (instr) {
             Dumper dumper;
@@ -146,7 +148,7 @@ Contexts Restruc::propagate_contexts(Address address,
                 auto child_contexts =
                     make_child_contexts(contexts, Context::ParentRole::Caller);
                 next_contexts =
-                    propagate_contexts(dst, std::move(child_contexts));
+                    propagate_contexts(dst, std::move(child_contexts), visited);
             }
             if (next_contexts.empty()) {
                 update_contexts_after_unknown_call(contexts, address);
@@ -165,7 +167,7 @@ Contexts Restruc::propagate_contexts(Address address,
                 auto child_contexts =
                     make_child_contexts(contexts, Context::ParentRole::Default);
                 auto next_contexts =
-                    propagate_contexts(dst, std::move(child_contexts));
+                    propagate_contexts(dst, std::move(child_contexts), visited);
                 merge_contexts(return_contexts, std::move(next_contexts));
             }
             if (unconditional_jump) {

@@ -80,7 +80,8 @@ namespace rstc {
             ZydisDecodedInstruction const *instruction = nullptr;
         };
 
-        Flo(Address entry_point = nullptr,
+        Flo(PE const &pe,
+            Address entry_point = nullptr,
             std::optional<Address> end = std::nullopt);
 
         AnalysisResult analyze(Address address, Instruction instr);
@@ -166,14 +167,30 @@ namespace rstc {
         bool promote_unknown_jumps(Address dst, Jump::Type new_type);
 
         Context const &emplace_context(Address address, Context &&context);
-        static void emulate(Address address,
+        void emulate(Address address,
                             ZydisDecodedInstruction const &instruction,
                             Context &context);
-        static void
+        void
         emulate_instruction(ZydisDecodedInstruction const &instruction,
                             Context &context,
                             Address address,
                             EmulationCallback const &callback);
+        void
+        emulate_instruction_push(ZydisDecodedInstruction const &instruction,
+                                 Context &context,
+                                 Address address);
+        void
+        emulate_instruction_pop(ZydisDecodedInstruction const &instruction,
+                                 Context &context,
+                                 Address address);
+        void
+        emulate_instruction_call(ZydisDecodedInstruction const &instruction,
+                                 Context &context,
+                                 Address address);
+        void
+        emulate_instruction_ret(ZydisDecodedInstruction const &instruction,
+                                Context &context,
+                                Address address);
         static void emulate_instruction_2op_helper(
             Context::RegisterValue &dst,
             Context::RegisterValue const &src,
@@ -187,6 +204,7 @@ namespace rstc {
         void add_jump(Jump::Type type, Address dst, Address src);
         void add_call(Address dst, Address src, Address ret);
 
+        PE const &pe_;
         Disassembly disassembly_;
         std::multimap<Address, Context> contexts_;
         Jumps inner_jumps_;
@@ -196,7 +214,8 @@ namespace rstc {
         int stack_depth_ = 0;
         bool stack_depth_was_modified_ = false;
 
-        static std::unordered_map<ZydisMnemonic, EmulationCallbackAction2OP> emulation_callback_actions_2op_;
+        static std::unordered_map<ZydisMnemonic, EmulationCallbackAction2OP>
+            emulation_callback_actions_2op_;
     };
 
 }

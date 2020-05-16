@@ -20,7 +20,7 @@ namespace rstc {
         Contexts
         propagate_contexts(Address address,
                            Contexts contexts,
-                           std::unordered_multiset<Address> visited = {});
+                           std::unordered_map<Address, size_t> visited = {});
         Contexts make_initial_contexts();
 
         static Contexts make_child_contexts(Contexts const &parents,
