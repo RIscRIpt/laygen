@@ -140,19 +140,11 @@ namespace rstc {
             ZydisRegister reg = ZYDIS_REGISTER_NONE;
         };
 
-        using EmulationCallback2OP =
-            std::function<void(Context::RegisterValue &dst,
-                               Context::RegisterValue const &src,
-                               int size)>;
-        using EmulationCallback3OP =
-            std::function<void(Context::RegisterValue &dst,
-                               Context::RegisterValue const &src,
-                               Context::RegisterValue const &imm,
-                               int size)>;
-        using EmulationCallback =
-            std::variant<EmulationCallback2OP, EmulationCallback3OP>;
-
-        using EmulationCallbackAction2OP =
+        using EmulationCallback = std::function<Context::RegisterValue(
+            Context::RegisterValue const &dst,
+            Context::RegisterValue const &src,
+            int size)>;
+        using EmulationCallbackAction =
             std::function<uintptr_t(uintptr_t, uintptr_t)>;
 
         bool is_inside(Address address) const;
@@ -168,31 +160,28 @@ namespace rstc {
 
         Context const &emplace_context(Address address, Context &&context);
         void emulate(Address address,
-                            ZydisDecodedInstruction const &instruction,
-                            Context &context);
-        void
-        emulate_instruction(ZydisDecodedInstruction const &instruction,
-                            Context &context,
-                            Address address,
-                            EmulationCallback const &callback);
+                     ZydisDecodedInstruction const &instruction,
+                     Context &context);
+        void emulate_instruction(ZydisDecodedInstruction const &instruction,
+                                 Context &context,
+                                 Address address,
+                                 EmulationCallback const &callback);
         void
         emulate_instruction_push(ZydisDecodedInstruction const &instruction,
                                  Context &context,
                                  Address address);
-        void
-        emulate_instruction_pop(ZydisDecodedInstruction const &instruction,
-                                 Context &context,
-                                 Address address);
+        void emulate_instruction_pop(ZydisDecodedInstruction const &instruction,
+                                     Context &context,
+                                     Address address);
         void
         emulate_instruction_call(ZydisDecodedInstruction const &instruction,
                                  Context &context,
                                  Address address);
-        void
-        emulate_instruction_ret(ZydisDecodedInstruction const &instruction,
-                                Context &context,
-                                Address address);
-        static void emulate_instruction_2op_helper(
-            Context::RegisterValue &dst,
+        void emulate_instruction_ret(ZydisDecodedInstruction const &instruction,
+                                     Context &context,
+                                     Address address);
+        static Context::RegisterValue emulate_instruction_helper(
+            Context::RegisterValue const &dst,
             Context::RegisterValue const &src,
             int size,
             std::function<uintptr_t(uintptr_t, uintptr_t)> action);
@@ -214,8 +203,8 @@ namespace rstc {
         int stack_depth_ = 0;
         bool stack_depth_was_modified_ = false;
 
-        static std::unordered_map<ZydisMnemonic, EmulationCallbackAction2OP>
-            emulation_callback_actions_2op_;
+        static std::unordered_map<ZydisMnemonic, EmulationCallbackAction>
+            emulation_callback_actions_;
     };
 
 }

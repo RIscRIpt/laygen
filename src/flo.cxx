@@ -6,8 +6,8 @@
 
 using namespace rstc;
 
-std::unordered_map<ZydisMnemonic, Flo::EmulationCallbackAction2OP>
-    Flo::emulation_callback_actions_2op_{
+std::unordered_map<ZydisMnemonic, Flo::EmulationCallbackAction>
+    Flo::emulation_callback_actions_{
         { ZYDIS_MNEMONIC_ADD,
           [](uintptr_t dst, uintptr_t src) { return dst + src; } },
         { ZYDIS_MNEMONIC_SUB,
@@ -18,12 +18,14 @@ std::unordered_map<ZydisMnemonic, Flo::EmulationCallbackAction2OP>
           [](uintptr_t dst, uintptr_t src) { return dst & src; } },
         { ZYDIS_MNEMONIC_XOR,
           [](uintptr_t dst, uintptr_t src) { return dst ^ src; } },
+        { ZYDIS_MNEMONIC_IMUL,
+          [](uintptr_t dst, uintptr_t src) { return dst * src; } },
     };
 
 Flo::Flo(PE const &pe, Address entry_point, std::optional<Address> end)
-    : pe_(pe)
-    , entry_point(entry_point)
+    : entry_point(entry_point)
     , end(end)
+    , pe_(pe)
 {
 }
 
@@ -262,38 +264,32 @@ void Flo::emulate(Address address,
         emulate_instruction(instruction,
                             context,
                             address,
-                            [](Context::RegisterValue &dst,
+                            [](Context::RegisterValue const &dst,
                                Context::RegisterValue const &src,
-                               int size) {
+                               int size) -> Context::RegisterValue {
                                 uintptr_t mask = ~0;
                                 if (size < 64) {
                                     mask = (1ULL << size) - 1;
                                 }
                                 if (dst && src && size < 32) {
-                                    dst = (*dst & ~mask) | (*src & mask);
+                                    return (*dst & ~mask) | (*src & mask);
                                 }
                                 else if (src) {
-                                    dst = *src & mask;
+                                    return *src & mask;
                                 }
-                                else {
-                                    dst = std::nullopt;
-                                }
+                                return std::nullopt;
                             });
     } break;
     case ZYDIS_MNEMONIC_ADD:
     case ZYDIS_MNEMONIC_SUB:
     case ZYDIS_MNEMONIC_OR:
     case ZYDIS_MNEMONIC_AND:
-    case ZYDIS_MNEMONIC_XOR: {
-        auto action = emulation_callback_actions_2op_.at(instruction.mnemonic);
-        emulate_instruction(instruction,
-                            context,
-                            address,
-                            std::bind(&Flo::emulate_instruction_2op_helper,
-                                      _1,
-                                      _2,
-                                      _3,
-                                      action));
+    case ZYDIS_MNEMONIC_XOR:
+    case ZYDIS_MNEMONIC_IMUL: {
+        auto action = emulation_callback_actions_.at(instruction.mnemonic);
+        auto callback =
+            std::bind(&Flo::emulate_instruction_helper, _1, _2, _3, action);
+        emulate_instruction(instruction, context, address, callback);
     } break;
     case ZYDIS_MNEMONIC_PUSH:
         emulate_instruction_push(instruction, context, address);
@@ -340,25 +336,38 @@ void Flo::emulate_instruction(ZydisDecodedInstruction const &instruction,
     Operand dst = get_operand(instruction.operands[0], context);
     Operand src;
     Context::RegisterValue imm;
+    int op_count = 1;
     if (instruction.operand_count >= 2) {
-        src = get_operand(instruction.operands[1], context);
+        op_count = 2;
+        if (auto op2 = instruction.operands[1];
+            op2.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
+            src = get_operand(op2, context);
+        }
     }
     if (instruction.operand_count >= 3) {
-        imm = get_operand(instruction.operands[2], context).value;
+        op_count = 3;
+        if (auto op3 = instruction.operands[2];
+            op3.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
+            if (op3.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                imm = get_operand(op3, context).value;
+            }
+        }
     }
     if (instruction.mnemonic == ZYDIS_MNEMONIC_XOR && dst.reg == src.reg) {
         dst.value = 0;
     }
-    else if (std::holds_alternative<EmulationCallback2OP>(callback)) {
-        auto cb2op = std::get<EmulationCallback2OP>(callback);
-        cb2op(dst.value, src.value, dst.size);
-    }
-    else if (std::holds_alternative<EmulationCallback3OP>(callback)) {
-        auto cb3op = std::get<EmulationCallback3OP>(callback);
-        cb3op(dst.value, src.value, imm, dst.size);
-    }
     else {
-        dst.value = std::nullopt;
+        if (op_count == 2) {
+            dst.value = callback(dst.value, src.value, dst.size);
+        }
+        else if (instruction.operands[2].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+            // TODO: use dst, if needed
+            // for now, assume it's unused.
+            dst.value = callback(src.value, imm, dst.size);
+        }
+        else {
+            dst.value = std::nullopt;
+        }
     }
     if (dst.reg != ZYDIS_REGISTER_NONE) {
         context.set_register(dst.reg, address, dst.value);
@@ -430,8 +439,8 @@ void Flo::emulate_instruction_ret(ZydisDecodedInstruction const &instruction,
     }
 }
 
-void Flo::emulate_instruction_2op_helper(
-    Context::RegisterValue &dst,
+Context::RegisterValue Flo::emulate_instruction_helper(
+    Context::RegisterValue const &dst,
     Context::RegisterValue const &src,
     int size,
     std::function<uintptr_t(uintptr_t, uintptr_t)> action)
@@ -442,15 +451,13 @@ void Flo::emulate_instruction_2op_helper(
     }
     if (dst && src) {
         if (size < 32) {
-            dst = (*dst & ~mask) | (action(*dst, *src) & mask);
+            return (*dst & ~mask) | (action(*dst, *src) & mask);
         }
         else {
-            dst = action(*dst, *src) & mask;
+            return action(*dst, *src) & mask;
         }
     }
-    else {
-        dst = std::nullopt;
-    }
+    return std::nullopt;
 }
 
 Flo::Operand Flo::get_operand(ZydisDecodedOperand const &operand,
