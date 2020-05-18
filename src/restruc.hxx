@@ -33,20 +33,29 @@ namespace rstc {
         static bool
         instruction_has_memory_access(ZydisDecodedInstruction const &instr);
         static bool operand_has_memory_access(ZydisDecodedOperand const &op);
+        static bool instruction_has_nonstack_memory_access(
+            ZydisDecodedInstruction const &instr);
+        static bool
+        operand_has_nonstack_memory_access(ZydisDecodedOperand const &op);
         static bool is_history_term_instr(ZydisDecodedInstruction const &instr);
 
         void dump_register_history(std::ostream &os,
                                    Dumper const &dumper,
                                    Context const &context,
                                    ZydisRegister reg,
-                                   std::unordered_set<Address> &visited);
+                                   std::unordered_set<Address> &visited) const;
+        void dump_memory_history(std::ostream &os,
+                                 Dumper const &dumper,
+                                 Context const &context,
+                                 ZydisDecodedOperand const &op,
+                                 std::unordered_set<Address> &visited) const;
         void
         dump_instruction_history(std::ostream &os,
                                  Dumper const &dumper,
                                  Address address,
                                  ZydisDecodedInstruction const &instr,
                                  std::vector<Context const *> const &contexts,
-                                 std::unordered_set<Address> visited = {});
+                                 std::unordered_set<Address> visited = {}) const;
 
         Reflo &reflo_;
         PE const &pe_;

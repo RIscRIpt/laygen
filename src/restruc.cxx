@@ -8,7 +8,7 @@
 
 using namespace rstc;
 
-#define DEBUG_CONTEXT_PROPAGATION
+// #define DEBUG_CONTEXT_PROPAGATION
 
 static ZydisRegister const VOLATILE_REGISTERS[] = {
     ZYDIS_REGISTER_RAX,  ZYDIS_REGISTER_RCX,  ZYDIS_REGISTER_RDX,
@@ -281,6 +281,22 @@ bool Restruc::operand_has_memory_access(ZydisDecodedOperand const &op)
            && op.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT;
 }
 
+bool Restruc::instruction_has_nonstack_memory_access(
+    ZydisDecodedInstruction const &instr)
+{
+    return std::any_of(instr.operands,
+                       instr.operands + instr.operand_count,
+                       operand_has_nonstack_memory_access);
+}
+
+bool Restruc::operand_has_nonstack_memory_access(ZydisDecodedOperand const &op)
+{
+    return op.type == ZYDIS_OPERAND_TYPE_MEMORY
+           && op.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT
+           && op.mem.base != ZYDIS_REGISTER_RSP
+           && op.mem.index != ZYDIS_REGISTER_RSP;
+}
+
 bool Restruc::is_history_term_instr(ZydisDecodedInstruction const &instr)
 {
     if (instr.mnemonic == ZYDIS_MNEMONIC_XOR) {
@@ -302,7 +318,7 @@ void Restruc::debug(std::ostream &os)
             continue;
         }
         for (auto const &[address, instr] : flo->get_disassembly()) {
-            if (!instruction_has_memory_access(*instr)) {
+            if (!instruction_has_nonstack_memory_access(*instr)) {
                 continue;
             }
             dump_instruction_history(os,
@@ -319,7 +335,7 @@ void Restruc::dump_register_history(std::ostream &os,
                                     Dumper const &dumper,
                                     Context const &context,
                                     ZydisRegister reg,
-                                    std::unordered_set<Address> &visited)
+                                    std::unordered_set<Address> &visited) const
 {
     {
         if (auto changed = context.get_register(reg); changed) {
@@ -342,13 +358,40 @@ void Restruc::dump_register_history(std::ostream &os,
     }
 }
 
+void Restruc::dump_memory_history(std::ostream &os,
+                                  Dumper const &dumper,
+                                  Context const &context,
+                                  ZydisDecodedOperand const &op,
+                                  std::unordered_set<Address> &visited) const
+{
+    if (auto mem_addr = Flo::get_memory_address(op, context); mem_addr) {
+        auto values = context.get_memory(*mem_addr, op.element_size / 8);
+        std::unordered_set<Address> sources(values.sources.begin(),
+                                            values.sources.end());
+        for (auto source : sources) {
+            if (source == pe_.get_entry_point() || visited.contains(source)) {
+                continue;
+            }
+            if (auto flo = reflo_.get_flo_by_address(source); flo) {
+                visited.emplace(source);
+                dump_instruction_history(os,
+                                         dumper,
+                                         source,
+                                         *flo->get_disassembly().at(source),
+                                         flo->get_contexts(source),
+                                         visited);
+            }
+        }
+    }
+}
+
 void Restruc::dump_instruction_history(
     std::ostream &os,
     Dumper const &dumper,
     Address address,
     ZydisDecodedInstruction const &instr,
     std::vector<Context const *> const &contexts,
-    std::unordered_set<Address> visited)
+    std::unordered_set<Address> visited) const
 {
     visited.emplace(address);
     DWORD va = pe_.raw_to_virtual_address(address);
@@ -388,6 +431,8 @@ void Restruc::dump_instruction_history(
                                           op.mem.index,
                                           visited);
                 }
+                dump_memory_history(os, dumper, *context, op, visited);
+                break;
             default: break;
             }
         }
