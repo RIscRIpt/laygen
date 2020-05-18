@@ -167,6 +167,10 @@ namespace rstc {
                                  Address address,
                                  EmulationCallback const &callback);
         void
+        emulate_instruction_lea(ZydisDecodedInstruction const &instruction,
+                                 Context &context,
+                                 Address address);
+        void
         emulate_instruction_push(ZydisDecodedInstruction const &instruction,
                                  Context &context,
                                  Address address);

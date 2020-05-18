@@ -291,6 +291,9 @@ void Flo::emulate(Address address,
             std::bind(&Flo::emulate_instruction_helper, _1, _2, _3, action);
         emulate_instruction(instruction, context, address, callback);
     } break;
+    case ZYDIS_MNEMONIC_LEA:
+        emulate_instruction_lea(instruction, context, address);
+        break;
     case ZYDIS_MNEMONIC_PUSH:
         emulate_instruction_push(instruction, context, address);
         break;
@@ -345,9 +348,9 @@ void Flo::emulate_instruction(ZydisDecodedInstruction const &instruction,
         }
     }
     if (instruction.operand_count >= 3) {
-        op_count = 3;
         if (auto op3 = instruction.operands[2];
             op3.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
+            op_count = 3;
             if (op3.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
                 imm = get_operand(op3, context).value;
             }
@@ -374,6 +377,18 @@ void Flo::emulate_instruction(ZydisDecodedInstruction const &instruction,
     }
     else if (dst.address) {
         context.set_memory(*dst.address, address, dst.value, dst.size / 8);
+    }
+}
+
+void Flo::emulate_instruction_lea(ZydisDecodedInstruction const &instruction,
+                                  Context &context,
+                                  Address address)
+{
+    Operand dst = get_operand(instruction.operands[0], context);
+    Operand src = get_operand(instruction.operands[1], context);
+    assert(dst.reg != ZYDIS_REGISTER_NONE);
+    if (src.address) {
+        context.set_register(dst.reg, address, *src.address);
     }
 }
 
@@ -478,7 +493,7 @@ Flo::Operand Flo::get_operand(ZydisDecodedOperand const &operand,
     } break;
     case ZYDIS_OPERAND_TYPE_MEMORY: {
         op.address = get_memory_address(operand, context);
-        if (op.address) {
+        if (op.address && op.size) {
             op.value = context.get_memory(*op.address, op.size / 8);
         }
     } break;
