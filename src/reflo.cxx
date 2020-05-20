@@ -42,6 +42,9 @@ Flo *Reflo::get_flo_by_address(Address address)
 
 std::pair<Address, Address> Reflo::get_analyzed_bounds() const
 {
+    if (flos_.empty()) {
+        return { nullptr, nullptr };
+    }
     auto last = flos_.rbegin()->second->get_disassembly().rbegin();
     return { flos_.begin()->first, last->first + last->second->length };
 }
@@ -49,6 +52,9 @@ std::pair<Address, Address> Reflo::get_analyzed_bounds() const
 std::pair<DWORD, DWORD> Reflo::get_analyzed_va_bounds() const
 {
     auto [first, last] = get_analyzed_bounds();
+    if (first == nullptr || last == nullptr) {
+        return { 0, 0 };
+    }
     return { pe_.raw_to_virtual_address(first),
              pe_.raw_to_virtual_address(last) };
 }
