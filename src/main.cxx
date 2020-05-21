@@ -11,7 +11,10 @@ int wmain(int argc, wchar_t *argv[])
         return EXIT_FAILURE;
     }
 
-    try {
+#ifdef NDEBUG
+    try
+#endif
+    {
         rstc::Reflo reflo(argv[1]);
         rstc::Restruc restruc(reflo);
 
@@ -26,10 +29,12 @@ int wmain(int argc, wchar_t *argv[])
         restruc.analyze();
         restruc.debug(std::cout);
     }
+#ifdef NDEBUG
     catch (std::exception const &e) {
         std::cerr << e.what() << '\n';
         return EXIT_FAILURE;
     }
+#endif
 
     return EXIT_SUCCESS;
 }

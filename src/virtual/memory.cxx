@@ -1,43 +1,47 @@
 #include "memory.hxx"
 
+#include "utils/hash.hxx"
+
 #include <algorithm>
 
 using namespace rstc;
 using namespace rstc::virt;
 
-Memory::Value::Value(Address source, Byte byte)
-    : source(source)
-    , byte(byte)
-{
-}
-
 Memory::Values::Values(size_t size, Address default_source)
-    : bytes(size)
-    , sources(size, default_source)
 {
+    container.reserve(size);
+    for (size_t i = 0; i < size; i++) {
+        container.emplace_back(make_symbolic_value(default_source, 1));
+    }
 }
 
-Memory::Values::operator Registers::Value() const
+Memory::Values::operator Value() const
 {
-    switch (bytes.size()) {
-    case 1: return bytes.front();
-
-    // MSVC (un)defined behaviour
-    case 2: return *reinterpret_cast<uint16_t const *>(bytes.data());
-    case 4: return *reinterpret_cast<uint32_t const *>(bytes.data());
-    case 8: return *reinterpret_cast<uint64_t const *>(bytes.data());
-
-    default:
-        if (bytes.size() < 8) {
-            uintptr_t value = 0;
-            for (auto it = bytes.rbegin(); it != bytes.rend(); ++it) {
-                value <<= 8;
-                value |= *it;
-            }
-            return value;
+    if (container.size() > 8) {
+        return Value();
+    }
+    bool symbolic = false;
+    uintptr_t value = 0;
+    uintptr_t id = 0;
+    for (auto const &byte : container) {
+        assert(byte.size() == 1);
+        if (!byte.is_symbolic()) {
+            assert(!(byte.value() & ~0xFF));
+            value <<= 8;
+            value |= byte.value();
+            utils::hash_combine(id, byte.value());
+        }
+        else {
+            symbolic = true;
+            id ^= byte.symbol().id();
         }
     }
-    return std::nullopt;
+    if (symbolic) {
+        return make_symbolic_value(container.front().source(),
+                                   id,
+                                   container.size());
+    }
+    return make_value(container.front().source(), value);
 }
 
 Memory::Memory(Address source)
@@ -52,25 +56,32 @@ Memory::Memory(Memory const *parent)
 {
 }
 
-void Memory::set(uintptr_t address,
-                 Address source,
-                 Registers::Value value,
-                 size_t size)
+void Memory::set(uintptr_t address, Value const &value)
 {
-    std::vector<Byte> bytes(size);
-    if (value) {
-        std::copy(reinterpret_cast<Byte *>(&*value),
-                  reinterpret_cast<Byte *>(&*value) + size,
-                  bytes.begin());
+    std::vector<Value> values(value.size());
+    if (!value.is_symbolic()) {
+        auto raw_value = value.value();
+        std::transform(reinterpret_cast<Byte *>(&raw_value),
+                       reinterpret_cast<Byte *>(&raw_value) + value.size(),
+                       values.begin(),
+                       [source = value.source()](Byte b) {
+                           return make_value(source, b, 1);
+                       });
     }
-    set(address, source, bytes);
+    else {
+        uintptr_t first_symbol_id = value.symbol().id();
+        for (size_t i = 1; i < value.size(); i++) {
+            values[i] = make_symbolic_value(value.source(), 1);
+            first_symbol_id ^= values[i].symbol().id();
+        }
+        values[0] = make_symbolic_value(value.source(), first_symbol_id, 1);
+    }
+    set(address, values);
 }
 
-void Memory::set(uintptr_t address,
-                 Address source,
-                 std::vector<Byte> const &bytes)
+void Memory::set(uintptr_t address, std::vector<Value> const &values)
 {
-    if (bytes.size() <= 0) {
+    if (values.empty()) {
         return;
     }
     auto tree = std::static_pointer_cast<Holder>(holder_);
@@ -78,7 +89,7 @@ void Memory::set(uintptr_t address,
     holder_ = new_tree;
     uintptr_t begin = 0;
     uintptr_t end = ~0;
-    uintptr_t address_end = address + bytes.size();
+    uintptr_t address_end = address + values.size();
     while (begin < end - 3) {
         uintptr_t middle = begin + (end - begin) / 2;
         if (address < middle && address_end < middle) {
@@ -104,8 +115,8 @@ void Memory::set(uintptr_t address,
         }
     }
     for (uintptr_t i = address; i != address_end; i++) {
-        uintptr_t index = i - address;
-        set_value(tree, new_tree, begin, end, i, source, bytes[index]);
+        auto const &value = values[i - address];
+        set_value(tree, new_tree, begin, end, i, value);
         tree = new_tree;
     }
 }
@@ -115,8 +126,7 @@ void Memory::set_value(std::shared_ptr<Holder> tree,
                        uintptr_t begin,
                        uintptr_t end,
                        uintptr_t address,
-                       Address source,
-                       Byte byte)
+                       Value const &value)
 {
     while (true) {
         uintptr_t middle = begin + (end - begin) / 2;
@@ -133,7 +143,7 @@ void Memory::set_value(std::shared_ptr<Holder> tree,
                 new_tree = std::static_pointer_cast<Holder>(new_tree->l);
             }
             else {
-                new_tree->l = std::make_shared<Value>(source, byte);
+                new_tree->l = std::make_shared<Value>(value);
                 break;
             }
         }
@@ -150,7 +160,7 @@ void Memory::set_value(std::shared_ptr<Holder> tree,
                 new_tree = std::static_pointer_cast<Holder>(new_tree->r);
             }
             else {
-                new_tree->r = std::make_shared<Value>(source, byte);
+                new_tree->r = std::make_shared<Value>(value);
                 break;
             }
         }
@@ -180,19 +190,16 @@ Memory::Values Memory::get(uintptr_t address, size_t size) const
     }
     if (tree) {
         for (uintptr_t i = address; i != address_end; i++) {
-            auto [source, byte] = get_value(tree, begin, end, i);
-            uintptr_t index = i - address;
-            values.bytes[index] = byte;
-            values.sources[index] = source;
+            values.container[i - address] = get_value(tree, begin, end, i);
         }
     }
     return values;
 }
 
-Memory::Value Memory::get_value(std::shared_ptr<Holder> tree,
-                                uintptr_t begin,
-                                uintptr_t end,
-                                uintptr_t address) const
+Value Memory::get_value(std::shared_ptr<Holder> tree,
+                        uintptr_t begin,
+                        uintptr_t end,
+                        uintptr_t address) const
 {
     std::shared_ptr<void> value = nullptr;
     while (tree) {
@@ -221,5 +228,5 @@ Memory::Value Memory::get_value(std::shared_ptr<Holder> tree,
     if (value) {
         return *std::static_pointer_cast<Value>(value);
     }
-    return Value(default_source_);
+    return make_symbolic_value(default_source_, 1);
 }

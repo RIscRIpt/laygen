@@ -134,16 +134,14 @@ namespace rstc {
 
     private:
         struct Operand {
-            Context::RegisterValue value = std::nullopt;
-            Context::RegisterValue address = std::nullopt;
-            int size = 0;
+            virt::Value value = virt::Value();
+            std::optional<uintptr_t> address = std::nullopt;
             ZydisRegister reg = ZYDIS_REGISTER_NONE;
         };
 
-        using EmulationCallback = std::function<Context::RegisterValue(
-            Context::RegisterValue const &dst,
-            Context::RegisterValue const &src,
-            int size)>;
+        using EmulationCallback = std::function<virt::Value(
+            virt::Value const &dst,
+            virt::Value const &src)>;
         using EmulationCallbackAction =
             std::function<uintptr_t(uintptr_t, uintptr_t)>;
 
@@ -184,13 +182,13 @@ namespace rstc {
         void emulate_instruction_ret(ZydisDecodedInstruction const &instruction,
                                      Context &context,
                                      Address address);
-        static Context::RegisterValue emulate_instruction_helper(
-            Context::RegisterValue const &dst,
-            Context::RegisterValue const &src,
-            int size,
+        static virt::Value emulate_instruction_helper(
+            virt::Value const &dst,
+            virt::Value const &src,
             std::function<uintptr_t(uintptr_t, uintptr_t)> action);
         static Operand get_operand(ZydisDecodedOperand const &operand,
-                                   Context const &context);
+                                   Context const &context,
+                                   Address source);
 
         bool stack_depth_is_ambiguous() const;
 

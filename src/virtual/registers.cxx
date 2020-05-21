@@ -194,6 +194,13 @@ const std::unordered_map<ZydisRegister, ZydisRegister>
         { ZYDIS_REGISTER_YMM31, ZYDIS_REGISTER_ZMM31 },
     };
 
+const std::unordered_set<ZydisRegister> Registers::legacy_ho_part_{
+    ZYDIS_REGISTER_AH,
+    ZYDIS_REGISTER_CH,
+    ZYDIS_REGISTER_DH,
+    ZYDIS_REGISTER_BH,
+};
+
 Registers::Registers(Registers const *parent)
     : holder_(parent ? parent->holder_ : std::make_shared<Holder>())
 {
@@ -204,7 +211,7 @@ Registers::Registers(Registers const *parent)
     }
 }
 
-std::optional<Registers::ValueSource>
+std::optional<Value>
 Registers::get(ZydisRegister zydis_reg) const
 {
     if (auto it = reg_promotion_map_.find(zydis_reg);
@@ -229,7 +236,7 @@ Registers::get(ZydisRegister zydis_reg) const
                 tree = std::static_pointer_cast<Holder>(tree->l);
             }
             else {
-                return *std::static_pointer_cast<ValueSource>(tree->l);
+                return *std::static_pointer_cast<Value>(tree->l);
             }
         }
         else {
@@ -238,7 +245,7 @@ Registers::get(ZydisRegister zydis_reg) const
                 tree = std::static_pointer_cast<Holder>(tree->r);
             }
             else {
-                return *std::static_pointer_cast<ValueSource>(tree->r);
+                return *std::static_pointer_cast<Value>(tree->r);
             }
         }
     }
@@ -246,18 +253,49 @@ Registers::get(ZydisRegister zydis_reg) const
 }
 
 // TODO: use register size
-void Registers::set(ZydisRegister zydis_reg, ValueSource valsrc)
+void Registers::set(ZydisRegister zydis_reg, Value value)
 {
+    auto promoted_reg = zydis_reg;
     if (auto it = reg_promotion_map_.find(zydis_reg);
         it != reg_promotion_map_.end()) {
-        zydis_reg = it->second;
+        promoted_reg = it->second;
     }
     Reg reg;
-    if (auto it = register_map.find(zydis_reg); it != register_map.end()) {
+    if (auto it = register_map.find(promoted_reg); it != register_map.end()) {
         reg = it->second;
     }
     else {
         return;
+    }
+    if (!value.is_symbolic()) {
+        switch (value.size()) {
+        default:
+        case 8:
+        case 4: break;
+        case 2:
+            if (auto orig_value = get(zydis_reg);
+                orig_value && !orig_value->is_symbolic()) {
+                auto new_value = orig_value->value() & 0xFFFFFFFFFFFF0000
+                                 | (value.value() & 0xFFFF);
+                value = Value(value.source(), new_value);
+            }
+            break;
+        case 1:
+            if (auto orig_value = get(zydis_reg);
+                orig_value && !orig_value->is_symbolic()) {
+                auto new_value = orig_value->value();
+                if (!legacy_ho_part_.contains(zydis_reg)) {
+                    new_value = new_value & 0xFFFFFFFFFFFFFF00
+                                | (value.value() & 0xFF);
+                }
+                else {
+                    new_value = new_value & 0xFFFFFFFFFFFF00FF
+                                | ((value.value() & 0xFF) << 8);
+                }
+                value = Value(value.source(), new_value);
+            }
+            break;
+        }
     }
     auto tree = std::static_pointer_cast<Holder>(holder_);
     auto new_tree = std::make_shared<Holder>();
@@ -275,7 +313,7 @@ void Registers::set(ZydisRegister zydis_reg, ValueSource valsrc)
                 tree = std::static_pointer_cast<Holder>(tree->l);
             }
             else {
-                new_tree->l = std::make_shared<ValueSource>(valsrc);
+                new_tree->l = std::make_shared<Value>(std::move(value));
                 break;
             }
         }
@@ -288,7 +326,7 @@ void Registers::set(ZydisRegister zydis_reg, ValueSource valsrc)
                 tree = std::static_pointer_cast<Holder>(tree->r);
             }
             else {
-                new_tree->r = std::make_shared<ValueSource>(valsrc);
+                new_tree->r = std::make_shared<Value>(std::move(value));
                 break;
             }
         }
@@ -313,7 +351,7 @@ void Registers::initialize_holder(Holder &holder, size_t begin, size_t end)
         initialize_holder(*l, begin, middle);
     }
     else {
-        holder.l = std::make_shared<ValueSource>();
+        holder.l = std::make_shared<Value>();
     }
     if (middle < end - 1) {
         auto r = std::make_shared<Holder>();
@@ -321,6 +359,6 @@ void Registers::initialize_holder(Holder &holder, size_t begin, size_t end)
         initialize_holder(*r, middle, end);
     }
     else {
-        holder.r = std::make_shared<ValueSource>();
+        holder.r = std::make_shared<Value>();
     }
 }

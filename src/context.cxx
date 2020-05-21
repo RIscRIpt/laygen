@@ -1,5 +1,7 @@
 #include "contexts.hxx"
 
+#include "utils/hash.hxx"
+
 #include <algorithm>
 #include <atomic>
 #include <functional>
@@ -9,13 +11,6 @@
 using namespace rstc;
 
 static std::atomic<size_t> GLOBAL_ID = 0;
-
-template<class T>
-static inline void hash_combine(std::size_t &seed, const T &v)
-{
-    std::hash<T> hasher;
-    seed ^= hasher(v) * 0x5851F42D4C957F2D + 0x14057B7EF767814F;
-}
 
 Context::Context(Address source)
     : hash_(0)
@@ -37,7 +32,7 @@ Context::Context(Context const *parent, ParentRole parent_role)
 {
 }
 
-Context::RegisterValueSource Context::get_register(ZydisRegister reg) const
+std::optional<virt::Value> Context::get_register(ZydisRegister reg) const
 {
     return registers_.get(reg);
 }
@@ -47,50 +42,45 @@ Context::MemoryValues Context::get_memory(uintptr_t address, size_t size) const
     return memory_.get(address, size);
 }
 
-void Context::set_register(ZydisRegister reg,
-                           Address source,
-                           Context::RegisterValue value)
-{
-    set_register(reg, virt::Registers::ValueSource{ value, source });
-}
-
-void Context::set_register(ZydisRegister reg,
-                           virt::Registers::ValueSource valsrc)
+void Context::set_register(ZydisRegister reg, virt::Value value)
 {
     if (!registers_.is_tracked(reg)) {
         return;
     }
     if (auto old = get_register(reg); old) {
-        hash_combine(hash_, old->source);
-        if (old->value) {
-            hash_combine(hash_, *old->value);
+        utils::hash_combine(hash_, old->source());
+        if (old->is_symbolic()) {
+            utils::hash_combine(hash_, old->symbol().id());
+        }
+        else {
+            utils::hash_combine(hash_, old->value());
         }
         // Don't "un"-hash `reg`,
         // as we will hash it only if old value didn't exist
     }
     else {
-        hash_combine(hash_, reg);
+        utils::hash_combine(hash_, reg);
     }
-    if (valsrc.value) {
-        hash_combine(hash_, *valsrc.value);
+    if (value.is_symbolic()) {
+        utils::hash_combine(hash_, value.symbol().id());
     }
-    hash_combine(hash_, valsrc.source);
-    registers_.set(reg, valsrc);
+    else {
+        utils::hash_combine(hash_, value.value());
+    }
+    utils::hash_combine(hash_, value.source());
+    registers_.set(reg, value);
 }
 
 void Context::set_all_registers_zero(Address source)
 {
     for (auto const &[zydis_reg, reg] : virt::Registers::register_map) {
-        set_register(zydis_reg, source, 0);
+        set_register(zydis_reg, virt::Value(source, 0));
     }
 }
 
-void Context::set_memory(uintptr_t address,
-                         Address source,
-                         RegisterValue value,
-                         size_t size)
+void Context::set_memory(uintptr_t address, virt::Value value)
 {
-    memory_.set(address, source, value, size);
+    memory_.set(address, value);
 }
 
 Context Context::make_child(ParentRole parent_role) const

@@ -2,11 +2,14 @@
 
 #include "core.hxx"
 
+#include "value.hxx"
+
 #include <Zydis/Zydis.h>
 
 #include <memory>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace rstc::virt {
 
@@ -77,20 +80,6 @@ namespace rstc::virt {
             REGISTERS_COUNT,
         };
 
-        using Value = std::optional<uintptr_t>;
-        struct ValueSource {
-            Value value;
-            Address source;
-            inline bool operator==(ValueSource const &other) const
-            {
-                return value == other.value && source == other.source;
-            }
-            inline bool operator!=(ValueSource const &other) const
-            {
-                return !(*this == other);
-            }
-        };
-
         Registers(Registers const *parent = nullptr);
 
         Registers(Registers const &) = delete;
@@ -99,8 +88,8 @@ namespace rstc::virt {
         Registers &operator=(Registers const &) = delete;
         Registers &operator=(Registers &&rhs) = default;
 
-        std::optional<ValueSource> get(ZydisRegister zydis_reg) const;
-        void set(ZydisRegister zydis_reg, ValueSource valsrc);
+        std::optional<Value> get(ZydisRegister zydis_reg) const;
+        void set(ZydisRegister zydis_reg, Value value);
 
         bool is_tracked(ZydisRegister zydis_reg) const;
 
@@ -119,6 +108,7 @@ namespace rstc::virt {
 
         static const std::unordered_map<ZydisRegister, ZydisRegister>
             reg_promotion_map_;
+        static const std::unordered_set<ZydisRegister> legacy_ho_part_;
     };
 
 }

@@ -8,7 +8,7 @@
 
 using namespace rstc;
 
-// #define DEBUG_CONTEXT_PROPAGATION
+#define DEBUG_CONTEXT_PROPAGATION
 
 static ZydisRegister const VOLATILE_REGISTERS[] = {
     ZYDIS_REGISTER_RAX,  ZYDIS_REGISTER_RCX,  ZYDIS_REGISTER_RDX,
@@ -37,11 +37,15 @@ void dump_register_value(std::ostream &os,
                          ZydisRegister reg)
 {
     if (auto changed = context.get_register(reg); changed) {
-        auto flo = reflo.get_flo_by_address(changed->source);
+        auto flo = reflo.get_flo_by_address(changed->source());
         if (flo) {
-            if (changed->value) {
-                os << std::setfill('0') << std::hex << std::setw(16)
-                   << *changed->value << '\t';
+            if (!changed->is_symbolic()) {
+                os << std::setfill('0') << std::hex << ' ' << std::setw(16)
+                   << changed->value() << " \n";
+            }
+            else {
+                os << std::setfill('0') << std::hex << '[' << std::setw(16)
+                   << changed->symbol().id() << "]\n";
             }
         }
     }
@@ -62,9 +66,10 @@ void Restruc::analyze()
     }
 }
 
-Contexts Restruc::propagate_contexts(Address address,
-                                     Contexts contexts,
-                                     std::unordered_map<Address, size_t> visited)
+Contexts
+Restruc::propagate_contexts(Address address,
+                            Contexts contexts,
+                            std::unordered_map<Address, size_t> visited)
 {
     Flo *flo = reflo_.get_flo_by_address(address);
     if (!flo) {
@@ -91,10 +96,12 @@ Contexts Restruc::propagate_contexts(Address address,
         auto const instr = propagation_result.instruction;
 #ifdef DEBUG_CONTEXT_PROPAGATION
         std::clog << std::dec << std::setfill(' ') << std::setw(8)
-                  << visited[address] << '/' << std::setw(8)
-                  << contexts.size() << ' ';
+                  << visited[address] << '/' << std::setw(8) << contexts.size()
+                  << ' ';
         if (instr) {
             Dumper dumper;
+            dumper.dump_instruction(std::clog, va, *instr);
+            // Read values
             for (size_t i = 0; i < instr->operand_count; i++) {
                 auto const &op = instr->operands[i];
                 if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
@@ -132,7 +139,6 @@ Contexts Restruc::propagate_contexts(Address address,
                     }
                 }
             }
-            dumper.dump_instruction(std::clog, va, *instr);
         }
         else {
             std::clog << std::hex << std::setfill('0') << std::setw(8)
@@ -193,12 +199,14 @@ Contexts Restruc::make_initial_contexts()
 {
     auto ep = reflo_.get_pe().get_entry_point();
     auto c = Context(ep);
-    c.set_register(ZYDIS_REGISTER_RAX, ep, pe_.raw_to_virtual_address(ep));
+    c.set_register(ZYDIS_REGISTER_RAX,
+                   virt::make_value(ep, pe_.raw_to_virtual_address(ep)));
     c.set_register(ZYDIS_REGISTER_RDX, *c.get_register(ZYDIS_REGISTER_RAX));
-    c.set_register(ZYDIS_REGISTER_RSP, ep, 0xFF10000000000000);
+    c.set_register(ZYDIS_REGISTER_RSP,
+                   virt::make_value(ep, 0xFF10000000000000));
     c.set_register(ZYDIS_REGISTER_R8, *c.get_register(ZYDIS_REGISTER_RCX));
     c.set_register(ZYDIS_REGISTER_R9, *c.get_register(ZYDIS_REGISTER_RAX));
-    c.set_register(ZYDIS_REGISTER_RFLAGS, ep, 0x244);
+    c.set_register(ZYDIS_REGISTER_RFLAGS, virt::make_value(ep, 0x244));
     Contexts contexts;
     contexts.emplace(std::move(c));
     return contexts;
@@ -225,18 +233,19 @@ void Restruc::update_contexts_after_unknown_call(Contexts &contexts,
                                                  Address caller)
 {
     Contexts new_contexts;
-    std::transform(contexts.begin(),
-                   contexts.end(),
-                   std::inserter(new_contexts, new_contexts.end()),
-                   [caller](Context const &context) {
-                       auto new_context =
-                           context.make_child(Context::ParentRole::Default);
-                       // Reset vlatile registers
-                       for (auto volatile_register : VOLATILE_REGISTERS) {
-                           new_context.set_register(volatile_register, caller);
-                       }
-                       return new_context;
-                   });
+    std::transform(
+        contexts.begin(),
+        contexts.end(),
+        std::inserter(new_contexts, new_contexts.end()),
+        [caller](Context const &context) {
+            auto new_context = context.make_child(Context::ParentRole::Default);
+            // Reset vlatile registers
+            for (auto volatile_register : VOLATILE_REGISTERS) {
+                new_context.set_register(volatile_register,
+                                         virt::make_symbolic_value(caller));
+            }
+            return new_context;
+        });
     contexts = std::move(new_contexts);
 }
 
@@ -339,18 +348,21 @@ void Restruc::dump_register_history(std::ostream &os,
 {
     {
         if (auto changed = context.get_register(reg); changed) {
-            auto flo = reflo_.get_flo_by_address(changed->source);
-            if (flo && !visited.contains(changed->source)) {
-                visited.emplace(changed->source);
-                if (changed->value) {
-                    os << std::hex << *changed->value << '\t';
+            auto flo = reflo_.get_flo_by_address(changed->source());
+            if (flo && !visited.contains(changed->source())) {
+                visited.emplace(changed->source());
+                if (!changed->is_symbolic()) {
+                    os << std::hex << ' ' << changed->value() << " \t";
+                }
+                else {
+                    os << std::hex << '[' << changed->symbol().id() << "]\t";
                 }
                 dump_instruction_history(
                     os,
                     dumper,
-                    changed->source,
-                    *flo->get_disassembly().at(changed->source),
-                    flo->get_contexts(changed->source),
+                    changed->source(),
+                    *flo->get_disassembly().at(changed->source()),
+                    flo->get_contexts(changed->source()),
                     visited);
                 os << "---\n";
             }
@@ -366,8 +378,10 @@ void Restruc::dump_memory_history(std::ostream &os,
 {
     if (auto mem_addr = Flo::get_memory_address(op, context); mem_addr) {
         auto values = context.get_memory(*mem_addr, op.element_size / 8);
-        std::unordered_set<Address> sources(values.sources.begin(),
-                                            values.sources.end());
+        std::unordered_set<Address> sources;
+        for (auto const &value : values.container) {
+            sources.emplace(value.source());
+        }
         for (auto source : sources) {
             if (source == pe_.get_entry_point() || visited.contains(source)) {
                 continue;
