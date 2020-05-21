@@ -57,6 +57,7 @@ namespace rstc::virt {
         inline int size() const { return size_; }
 
         inline void set_source(Address source) { source_ = source; }
+        inline void set_size(int size) { size_ = size; }
 
     private:
         Address source_;

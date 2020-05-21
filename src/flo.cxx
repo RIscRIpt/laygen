@@ -476,11 +476,11 @@ virt::Value Flo::emulate_instruction_helper(
     std::function<uintptr_t(uintptr_t, uintptr_t)> action)
 {
     uintptr_t mask = ~0;
-    if (src.size() < 64) {
-        mask = (1ULL << src.size()) - 1;
+    if (dst.size() < 8) {
+        mask = (1ULL << (dst.size() * 8)) - 1;
     }
     if (!dst.is_symbolic() && !src.is_symbolic()) {
-        if (src.size() < 32) {
+        if (dst.size() < 4) {
             return virt::make_value(
                 src.source(),
                 (dst.value() & ~mask)
@@ -512,6 +512,7 @@ Flo::Operand Flo::get_operand(ZydisDecodedOperand const &operand,
         op.reg = operand.reg.value;
         if (auto valsrc = context.get_register(op.reg); valsrc) {
             op.value = *valsrc;
+            op.value.set_size(operand.element_size / 8);
         }
         else {
             op.value =
