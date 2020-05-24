@@ -13,15 +13,28 @@ namespace rstc {
         Restruc(Reflo &reflo);
 
         void analyze();
+        void set_max_analyzing_threads(size_t amount);
 
         void debug(std::ostream &os);
 
     private:
-        Contexts
-        propagate_contexts(Address address,
+        void prepare_flos();
+        void analyze_flos();
+
+        Flo *pop_unprocessed_flo();
+
+        void run_analysis(Flo &flo);
+        void wait_for_analysis();
+
+        void wait_before_analysis_run();
+
+        void
+        propagate_contexts(Flo &flo,
                            Contexts contexts,
+                           Address address,
                            std::unordered_map<Address, size_t> visited = {});
-        Contexts make_initial_contexts();
+
+        Contexts make_flo_initial_contexts(Flo &flo);
 
         static Contexts make_child_contexts(Contexts const &parents,
                                             Context::ParentRole parent_role);
@@ -59,7 +72,13 @@ namespace rstc {
 
         Reflo &reflo_;
         PE const &pe_;
+
+        size_t max_analyzing_threads_;
+        std::atomic<size_t> analyzing_threads_count_ = 0;
         std::vector<std::thread> analyzing_threads_;
+        std::mutex analyzing_threads_mutex_;
+        std::condition_variable analyzing_threads_cv_;
+        std::deque<Flo *> unprocessed_flos_;
     };
 
 }

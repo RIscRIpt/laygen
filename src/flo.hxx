@@ -97,6 +97,8 @@ namespace rstc {
 
         ZydisDecodedInstruction const *get_instruction(Address address) const;
 
+        bool is_inside(Address address) const;
+
         static Address
         get_jump_destination(Address address,
                              ZydisDecodedInstruction const &instruction);
@@ -145,7 +147,6 @@ namespace rstc {
         using EmulationCallbackAction =
             std::function<uintptr_t(uintptr_t, uintptr_t)>;
 
-        bool is_inside(Address address) const;
         Jump::Type get_jump_type(Address dst,
                                  Address src,
                                  Address next,

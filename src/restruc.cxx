@@ -1,6 +1,7 @@
 #include "restruc.hxx"
 
 #include "dumper.hxx"
+#include "scope_guard.hxx"
 
 #include <algorithm>
 #include <iostream>
@@ -8,7 +9,7 @@
 
 using namespace rstc;
 
-#define DEBUG_CONTEXT_PROPAGATION
+// #define DEBUG_CONTEXT_PROPAGATION
 
 static ZydisRegister const VOLATILE_REGISTERS[] = {
     ZYDIS_REGISTER_RAX,  ZYDIS_REGISTER_RCX,  ZYDIS_REGISTER_RDX,
@@ -56,48 +57,104 @@ void dump_register_value(std::ostream &os,
 Restruc::Restruc(Reflo &reflo)
     : reflo_(reflo)
     , pe_(reflo.get_pe())
+    , max_analyzing_threads_(std::thread::hardware_concurrency())
 {
 }
 
 void Restruc::analyze()
 {
-    if (auto ef = reflo_.get_entry_flo(); ef) {
-        propagate_contexts(ef->entry_point, make_initial_contexts());
+    prepare_flos();
+    analyze_flos();
+}
+
+void Restruc::set_max_analyzing_threads(size_t amount)
+{
+    max_analyzing_threads_ = amount;
+}
+
+void Restruc::prepare_flos()
+{
+    for (auto const &[address, flo] : reflo_.get_flos()) {
+        unprocessed_flos_.push_back(flo.get());
     }
 }
 
-Contexts
-Restruc::propagate_contexts(Address address,
-                            Contexts contexts,
-                            std::unordered_map<Address, size_t> visited)
+void Restruc::analyze_flos()
 {
-    Flo *flo = reflo_.get_flo_by_address(address);
-    if (!flo) {
-        return contexts;
+    while (!unprocessed_flos_.empty()) {
+        auto flo = pop_unprocessed_flo();
+        run_analysis(*flo);
     }
-    Contexts return_contexts;
+    wait_for_analysis();
+}
+
+Flo *Restruc::pop_unprocessed_flo()
+{
+    if (unprocessed_flos_.empty()) {
+        return nullptr;
+    }
+    auto flo = unprocessed_flos_.front();
+    unprocessed_flos_.pop_front();
+    return flo;
+}
+
+void Restruc::wait_before_analysis_run()
+{
+    auto lock = std::unique_lock(analyzing_threads_mutex_);
+    analyzing_threads_cv_.wait(lock, [this] {
+        return analyzing_threads_count_ < max_analyzing_threads_;
+    });
+    ++analyzing_threads_count_;
+}
+
+void Restruc::run_analysis(Flo &flo)
+{
+    wait_before_analysis_run();
+    analyzing_threads_.emplace_back([this, &flo]() mutable {
+        ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
+            --analyzing_threads_count_;
+            analyzing_threads_cv_.notify_all();
+        });
+        propagate_contexts(flo,
+                           make_flo_initial_contexts(flo),
+                           flo.entry_point);
+    });
+}
+
+void Restruc::wait_for_analysis()
+{
+    std::for_each(analyzing_threads_.begin(),
+                  analyzing_threads_.end(),
+                  [](std::thread &t) { t.join(); });
+    analyzing_threads_.clear();
+}
+
+void Restruc::propagate_contexts(Flo &flo,
+                                 Contexts contexts,
+                                 Address address,
+                                 std::unordered_map<Address, size_t> visited)
+{
     bool new_basic_block = true;
     // Visit visited instructions without going deeper.
     while (address && !contexts.empty() && visited[address] < 2) {
+        visited[address]++;
 #ifdef DEBUG_CONTEXT_PROPAGATION
         DWORD va = pe_.raw_to_virtual_address(address);
 #endif
         if (new_basic_block) {
             new_basic_block = false;
-            flo->filter_contexts(address, contexts);
+            flo.filter_contexts(address, contexts);
             if (contexts.empty()) {
                 break;
             }
         }
-        visited[address]++;
         auto propagation_result =
-            flo->propagate_contexts(address, std::move(contexts));
+            flo.propagate_contexts(address, std::move(contexts));
         contexts = std::move(propagation_result.new_contexts);
         auto const instr = propagation_result.instruction;
 #ifdef DEBUG_CONTEXT_PROPAGATION
-        std::clog << std::dec << std::setfill(' ') << std::setw(8)
-                  << visited[address] << '/' << std::setw(8) << contexts.size()
-                  << ' ';
+        std::clog << std::dec << std::setfill(' ') << std::setw(5)
+                  << contexts.size() << "ctx ";
         if (instr) {
             Dumper dumper;
             dumper.dump_instruction(std::clog, va, *instr);
@@ -150,31 +207,23 @@ Restruc::propagate_contexts(Address address,
         }
         if (instr->mnemonic == ZYDIS_MNEMONIC_CALL) {
             Contexts next_contexts;
-            if (auto dst = flo->get_call_destination(address, *instr); dst) {
-                auto child_contexts =
-                    make_child_contexts(contexts, Context::ParentRole::Caller);
-                next_contexts =
-                    propagate_contexts(dst, std::move(child_contexts), visited);
-            }
-            if (next_contexts.empty()) {
-                update_contexts_after_unknown_call(contexts, address);
-            }
-            else {
-                set_contexts_after_call(contexts, next_contexts);
-            }
+            update_contexts_after_unknown_call(contexts, address);
         }
         else if (auto unconditional_jump =
                      instr->mnemonic == ZYDIS_MNEMONIC_JMP;
                  unconditional_jump
                  || Flo::is_conditional_jump(instr->mnemonic)) {
             auto dsts =
-                flo->get_jump_destinations(pe_, address, *instr, contexts);
+                flo.get_jump_destinations(pe_, address, *instr, contexts);
             for (auto dst : dsts) {
-                auto child_contexts =
-                    make_child_contexts(contexts, Context::ParentRole::Default);
-                auto next_contexts =
-                    propagate_contexts(dst, std::move(child_contexts), visited);
-                merge_contexts(return_contexts, std::move(next_contexts));
+                if (!flo.is_inside(dst)) {
+                    continue;
+                }
+                propagate_contexts(
+                    flo,
+                    make_child_contexts(contexts, Context::ParentRole::Default),
+                    dst,
+                    visited);
             }
             if (unconditional_jump) {
                 break;
@@ -187,26 +236,17 @@ Restruc::propagate_contexts(Address address,
             }
         }
         else if (instr->mnemonic == ZYDIS_MNEMONIC_RET) {
-            merge_contexts(return_contexts, std::move(contexts));
             break;
         }
         address += instr->length;
     }
-    return return_contexts;
 }
 
-Contexts Restruc::make_initial_contexts()
+Contexts Restruc::make_flo_initial_contexts(Flo &flo)
 {
-    auto ep = reflo_.get_pe().get_entry_point();
-    auto c = Context(ep);
-    c.set_register(ZYDIS_REGISTER_RAX,
-                   virt::make_value(ep, pe_.raw_to_virtual_address(ep)));
-    c.set_register(ZYDIS_REGISTER_RDX, *c.get_register(ZYDIS_REGISTER_RAX));
+    auto c = Context(flo.entry_point);
     c.set_register(ZYDIS_REGISTER_RSP,
-                   virt::make_value(ep, 0xFF10000000000000));
-    c.set_register(ZYDIS_REGISTER_R8, *c.get_register(ZYDIS_REGISTER_RCX));
-    c.set_register(ZYDIS_REGISTER_R9, *c.get_register(ZYDIS_REGISTER_RAX));
-    c.set_register(ZYDIS_REGISTER_RFLAGS, virt::make_value(ep, 0x244));
+                   virt::make_value(flo.entry_point, 0xFF10000000000000));
     Contexts contexts;
     contexts.emplace(std::move(c));
     return contexts;

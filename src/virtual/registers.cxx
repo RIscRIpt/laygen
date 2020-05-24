@@ -275,7 +275,7 @@ void Registers::set(ZydisRegister zydis_reg, Value value)
         case 2:
             if (auto orig_value = get(zydis_reg);
                 orig_value && !orig_value->is_symbolic()) {
-                auto new_value = orig_value->value() & 0xFFFFFFFFFFFF0000
+                auto new_value = (orig_value->value() & 0xFFFFFFFFFFFF0000)
                                  | (value.value() & 0xFFFF);
                 value = Value(value.source(), new_value);
             }
@@ -285,11 +285,11 @@ void Registers::set(ZydisRegister zydis_reg, Value value)
                 orig_value && !orig_value->is_symbolic()) {
                 auto new_value = orig_value->value();
                 if (!legacy_ho_part_.contains(zydis_reg)) {
-                    new_value = new_value & 0xFFFFFFFFFFFFFF00
+                    new_value = (new_value & 0xFFFFFFFFFFFFFF00)
                                 | (value.value() & 0xFF);
                 }
                 else {
-                    new_value = new_value & 0xFFFFFFFFFFFF00FF
+                    new_value = (new_value & 0xFFFFFFFFFFFF00FF)
                                 | ((value.value() & 0xFF) << 8);
                 }
                 value = Value(value.source(), new_value);

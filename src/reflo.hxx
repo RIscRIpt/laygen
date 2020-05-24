@@ -61,7 +61,7 @@ namespace rstc {
 
         size_t max_analyzing_threads_;
         std::atomic<size_t> analyzing_threads_count_ = 0;
-        std::mutex flos_mutex_;
+        std::mutex flos_mutex_; // TODO: check if usages of this mutex can be separated
         std::condition_variable flos_cv_;
         std::vector<std::thread> analyzing_threads_;
         std::unordered_set<Address> created_flos_;

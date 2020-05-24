@@ -25,6 +25,7 @@ int wmain(int argc, wchar_t *argv[])
         std::cout << std::setfill('0') << "Analyzed: [" << std::hex
                   << std::setw(8) << analyzed.first << "; " << std::hex
                   << std::setw(8) << analyzed.second << "]\n";
+        restruc.set_max_analyzing_threads(128);
         std::cout << "Restruc::analyze ...\n";
         restruc.analyze();
         restruc.debug(std::cout);
