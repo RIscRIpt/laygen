@@ -18,11 +18,6 @@ namespace rstc {
         void debug(std::ostream &os);
 
     private:
-        void prepare_flos();
-        void analyze_flos();
-
-        Flo *pop_unprocessed_flo();
-
         void run_analysis(Flo &flo);
         void wait_for_analysis();
 
@@ -78,7 +73,6 @@ namespace rstc {
         std::vector<std::thread> analyzing_threads_;
         std::mutex analyzing_threads_mutex_;
         std::condition_variable analyzing_threads_cv_;
-        std::deque<Flo *> unprocessed_flos_;
     };
 
 }

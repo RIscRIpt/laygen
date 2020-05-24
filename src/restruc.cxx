@@ -9,6 +9,7 @@
 
 using namespace rstc;
 
+#define DEBUG_ANALYSIS_PROGRESS
 // #define DEBUG_CONTEXT_PROPAGATION
 
 static ZydisRegister const VOLATILE_REGISTERS[] = {
@@ -63,39 +64,21 @@ Restruc::Restruc(Reflo &reflo)
 
 void Restruc::analyze()
 {
-    prepare_flos();
-    analyze_flos();
+    for (auto const &[address, flo] : reflo_.get_flos()) {
+        run_analysis(*flo);
+    }
+#ifdef DEBUG_ANALYSIS_PROGRESS
+    std::clog << "Waiting for analysis to finish ...\n";
+#endif
+    wait_for_analysis();
+#ifdef DEBUG_ANALYSIS_PROGRESS
+    std::clog << "Done.\n";
+#endif
 }
 
 void Restruc::set_max_analyzing_threads(size_t amount)
 {
     max_analyzing_threads_ = amount;
-}
-
-void Restruc::prepare_flos()
-{
-    for (auto const &[address, flo] : reflo_.get_flos()) {
-        unprocessed_flos_.push_back(flo.get());
-    }
-}
-
-void Restruc::analyze_flos()
-{
-    while (!unprocessed_flos_.empty()) {
-        auto flo = pop_unprocessed_flo();
-        run_analysis(*flo);
-    }
-    wait_for_analysis();
-}
-
-Flo *Restruc::pop_unprocessed_flo()
-{
-    if (unprocessed_flos_.empty()) {
-        return nullptr;
-    }
-    auto flo = unprocessed_flos_.front();
-    unprocessed_flos_.pop_front();
-    return flo;
 }
 
 void Restruc::wait_before_analysis_run()
@@ -115,6 +98,12 @@ void Restruc::run_analysis(Flo &flo)
             --analyzing_threads_count_;
             analyzing_threads_cv_.notify_all();
         });
+#ifdef DEBUG_ANALYSIS_PROGRESS
+        std::clog << "Analyzing: " << analyzing_threads_.size() << '/'
+                  << reflo_.get_flos().size() << ": " << std::setfill('0')
+                  << std::setw(8) << pe_.raw_to_virtual_address(flo.entry_point)
+                  << '\n';
+#endif
         propagate_contexts(flo,
                            make_flo_initial_contexts(flo),
                            flo.entry_point);
@@ -392,10 +381,13 @@ void Restruc::dump_register_history(std::ostream &os,
             if (flo && !visited.contains(changed->source())) {
                 visited.emplace(changed->source());
                 if (!changed->is_symbolic()) {
-                    os << std::hex << ' ' << changed->value() << " \t";
+                    os << std::hex << ' ' << std::setw(16) << changed->value()
+                       << "      \t";
                 }
                 else {
-                    os << std::hex << '[' << changed->symbol().id() << "]\t";
+                    os << std::hex << '[' << std::setw(16)
+                       << changed->symbol().id() << '+' << std::setw(4)
+                       << changed->symbol().offset() << "]\t";
                 }
                 dump_instruction_history(
                     os,
