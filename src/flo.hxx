@@ -102,7 +102,7 @@ namespace rstc {
         static Address
         get_jump_destination(Address address,
                              ZydisDecodedInstruction const &instruction);
-        static std::vector<Address>
+        static std::unordered_set<Address>
         get_jump_destinations(PE const &pe,
                               Address address,
                               ZydisDecodedInstruction const &instruction,

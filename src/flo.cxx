@@ -568,7 +568,7 @@ void Flo::add_jump(Jump::Type type, Address dst, Address src)
 
 void Flo::add_call(Address dst, Address src, Address ret)
 {
-    calls_.emplace(src, Call(dst, src, ret));
+    calls_.emplace(dst, Call(dst, src, ret));
 }
 
 bool Flo::promote_unknown_jumps(Address dst, Jump::Type new_type)
@@ -673,7 +673,7 @@ Address Flo::get_jump_destination(Address address,
     }
 }
 
-std::vector<Address>
+std::unordered_set<Address>
 Flo::get_jump_destinations(PE const &pe,
                            Address address,
                            ZydisDecodedInstruction const &instruction,
@@ -682,11 +682,11 @@ Flo::get_jump_destinations(PE const &pe,
     assert(instruction.mnemonic == ZYDIS_MNEMONIC_JMP
            || is_conditional_jump(instruction.mnemonic));
     assert(instruction.operand_count > 0);
-    std::vector<Address> dsts;
+    std::unordered_set<Address> dsts;
     auto const &op = instruction.operands[0];
     switch (op.type) {
     case ZYDIS_OPERAND_TYPE_IMMEDIATE:
-        dsts.push_back(address + instruction.length + op.imm.value.s);
+        dsts.emplace(address + instruction.length + op.imm.value.s);
         break;
     case ZYDIS_OPERAND_TYPE_REGISTER:
         dsts.reserve(contexts.size());
@@ -695,7 +695,7 @@ Flo::get_jump_destinations(PE const &pe,
                 va_dst && !va_dst->is_symbolic()) {
                 if (auto dst = pe.virtual_to_raw_address(va_dst->value());
                     dst) {
-                    dsts.push_back(dst);
+                    dsts.emplace(dst);
                 }
             }
         }
