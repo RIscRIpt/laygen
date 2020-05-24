@@ -38,6 +38,7 @@ namespace rstc::utils {
         {
         }
         value_type const &operator*() const { return iterator_->second; }
+        value_type const *operator->() { return &iterator_->second; }
         bool operator==(MultimapValuesIterator<K, V> const &rhs) const
         {
             return iterator_ == rhs.iterator_;
@@ -53,6 +54,15 @@ namespace rstc::utils {
         MultimapValuesIterator<K, V> &operator++()
         {
             ++iterator_;
+            return *this;
+        }
+        MultimapValuesIterator<K, V> operator--(int)
+        {
+            return MultimapValuesIterator(--iterator_);
+        }
+        MultimapValuesIterator<K, V> &operator--()
+        {
+            --iterator_;
             return *this;
         }
 
