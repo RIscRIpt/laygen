@@ -27,12 +27,25 @@ namespace rstc {
         propagate_contexts(Flo &flo,
                            Contexts contexts,
                            Address address,
+                           Address end = nullptr,
                            std::unordered_map<Address, size_t> visited = {});
 
         Contexts make_flo_initial_contexts(Flo &flo);
 
-        static Contexts make_child_contexts(Contexts const &parents,
-                                            Context::ParentRole parent_role);
+        template<typename CS>
+        static Contexts make_child_contexts(CS const &parents,
+                                            Context::ParentRole parent_role)
+        {
+            Contexts child_contexts;
+            std::transform(parents.begin(),
+                           parents.end(),
+                           std::inserter(child_contexts, child_contexts.end()),
+                           std::bind(&Context::make_child,
+                                     std::placeholders::_1,
+                                     parent_role));
+            return child_contexts;
+        }
+
         static void merge_contexts(Contexts &dst, Contexts contexts);
         static void update_contexts_after_unknown_call(Contexts &contexts,
                                                        Address caller);

@@ -2,6 +2,7 @@
 
 #include "dumper.hxx"
 #include "scope_guard.hxx"
+#include "utils/adapters.hxx"
 
 #include <algorithm>
 #include <iostream>
@@ -9,8 +10,8 @@
 
 using namespace rstc;
 
-#define DEBUG_ANALYSIS_PROGRESS
-// #define DEBUG_CONTEXT_PROPAGATION
+//#define DEBUG_ANALYSIS_PROGRESS
+//#define DEBUG_CONTEXT_PROPAGATION
 
 static ZydisRegister const VOLATILE_REGISTERS[] = {
     ZYDIS_REGISTER_RAX,  ZYDIS_REGISTER_RCX,  ZYDIS_REGISTER_RDX,
@@ -99,10 +100,10 @@ void Restruc::run_analysis(Flo &flo)
             analyzing_threads_cv_.notify_all();
         });
 #ifdef DEBUG_ANALYSIS_PROGRESS
-        std::clog << "Analyzing: " << analyzing_threads_.size() << '/'
-                  << reflo_.get_flos().size() << ": " << std::setfill('0')
-                  << std::setw(8) << pe_.raw_to_virtual_address(flo.entry_point)
-                  << '\n';
+        std::clog << "Analyzing: " << std::dec << analyzing_threads_.size()
+                  << '/' << std::dec << reflo_.get_flos().size() << ": "
+                  << std::setfill('0') << std::setw(8) << std::hex
+                  << pe_.raw_to_virtual_address(flo.entry_point) << '\n';
 #endif
         propagate_contexts(flo,
                            make_flo_initial_contexts(flo),
@@ -121,11 +122,17 @@ void Restruc::wait_for_analysis()
 void Restruc::propagate_contexts(Flo &flo,
                                  Contexts contexts,
                                  Address address,
+                                 Address end,
                                  std::unordered_map<Address, size_t> visited)
 {
     bool new_basic_block = true;
+    if (!end) {
+        end = flo.get_disassembly().rbegin()->first;
+    }
     // Visit visited instructions without going deeper.
-    while (address && !contexts.empty() && visited[address] < 2) {
+    while (address && address < end && !contexts.empty()
+           && visited[address] < 2) {
+        bool reset_next_contexts = false;
         visited[address]++;
 #ifdef DEBUG_CONTEXT_PROPAGATION
         DWORD va = pe_.raw_to_virtual_address(address);
@@ -205,13 +212,15 @@ void Restruc::propagate_contexts(Flo &flo,
             auto dsts =
                 flo.get_jump_destinations(pe_, address, *instr, contexts);
             for (auto dst : dsts) {
-                if (!flo.is_inside(dst)) {
+                // Analyze only loops (inner backward jumps)
+                if (dst >= address || !flo.is_inside(dst)) {
                     continue;
                 }
                 propagate_contexts(
                     flo,
                     make_child_contexts(contexts, Context::ParentRole::Default),
                     dst,
+                    address,
                     visited);
             }
             if (unconditional_jump) {
@@ -221,13 +230,31 @@ void Restruc::propagate_contexts(Flo &flo,
                 new_basic_block = true;
             }
             if (dsts.empty() && unconditional_jump) {
-                break;
+                reset_next_contexts = true;
             }
         }
         else if (instr->mnemonic == ZYDIS_MNEMONIC_RET) {
-            break;
+            reset_next_contexts = true;
         }
         address += instr->length;
+        // Check if next instruction is inside,
+        // if so set contexts from previous inner jump with current destination,
+        // otherwise stop.
+        if (reset_next_contexts) {
+            if (!flo.is_inside(address)) {
+                break;
+            }
+            auto jumps = utils::multimap_values(flo.get_inner_jumps().equal_range(address));
+            assert(jumps.begin() != jumps.end());
+#ifdef NDEBUG
+            if (jumps.begin() == jumps.end()) {
+                break;
+            }
+#endif
+            auto src = std::prev(jumps.end())->src;
+            auto jump_contexts = utils::multimap_values(flo.get_contexts().equal_range(src));
+            contexts = make_child_contexts(jump_contexts, Context::ParentRole::Default);
+        }
     }
 }
 
@@ -239,18 +266,6 @@ Contexts Restruc::make_flo_initial_contexts(Flo &flo)
     Contexts contexts;
     contexts.emplace(std::move(c));
     return contexts;
-}
-
-Contexts Restruc::make_child_contexts(Contexts const &parents,
-                                      Context::ParentRole parent_role)
-{
-    Contexts child_contexts;
-    std::transform(
-        parents.begin(),
-        parents.end(),
-        std::inserter(child_contexts, child_contexts.end()),
-        std::bind(&Context::make_child, std::placeholders::_1, parent_role));
-    return child_contexts;
 }
 
 void Restruc::merge_contexts(Contexts &dst, Contexts contexts)
