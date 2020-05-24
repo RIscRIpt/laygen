@@ -12,20 +12,14 @@ namespace rstc::virt {
     public:
         class Symbol {
         public:
-            Symbol();
-            explicit Symbol(uintptr_t id);
-            inline bool operator==(Symbol const &rhs) const
-            {
-                return id_ == rhs.id_;
-            }
-            inline bool operator!=(Symbol const &rhs) const
-            {
-                return id_ != rhs.id_;
-            }
+            explicit Symbol(uintptr_t id = 0, intptr_t offset = 0);
+
             inline uintptr_t id() const { return id_; }
+            inline intptr_t offset() const { return offset_; }
 
         private:
             uintptr_t id_;
+            intptr_t offset_;
             static std::mt19937_64 id_generator;
             static std::uniform_int_distribution<uintptr_t> id_distribution;
         };
@@ -35,16 +29,6 @@ namespace rstc::virt {
         explicit Value(Address source = nullptr,
                        ValueContainer value = Symbol(),
                        int size = 8);
-
-        /*
-        Value(Value const &other);
-        Value(Value &&other);
-
-        Value &operator=(Value const &rhs);
-        Value &operator=(Value &&rhs) noexcept;
-
-        void swap(Value &a, Value &b);
-        */
 
         inline bool is_symbolic() const
         {
@@ -66,6 +50,5 @@ namespace rstc::virt {
     };
 
     Value make_value(Address source, uintptr_t value, int size = 8);
-    Value make_symbolic_value(Address source, int size = 8);
-    Value make_symbolic_value(Address source, uintptr_t id, int size = 8);
+    Value make_symbolic_value(Address source, int size = 8, intptr_t offset = 0, uintptr_t id = 0);
 }

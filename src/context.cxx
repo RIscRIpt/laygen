@@ -19,7 +19,7 @@ Context::Context(Address source)
     , registers_()
     , memory_(source)
 {
-    set_all_registers_zero(source);
+    set_all_registers_symbolic(source);
 }
 
 Context::Context(Context const *parent, ParentRole parent_role)
@@ -71,10 +71,10 @@ void Context::set_register(ZydisRegister reg, virt::Value value)
     registers_.set(reg, value);
 }
 
-void Context::set_all_registers_zero(Address source)
+void Context::set_all_registers_symbolic(Address source)
 {
     for (auto const &[zydis_reg, reg] : virt::Registers::register_map) {
-        set_register(zydis_reg, virt::Value(source, 0));
+        set_register(zydis_reg, virt::make_symbolic_value(source));
     }
 }
 

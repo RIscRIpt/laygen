@@ -38,8 +38,9 @@ Memory::Values::operator Value() const
     }
     if (symbolic) {
         return make_symbolic_value(container.front().source(),
-                                   id,
-                                   container.size());
+                                   container.size(),
+                                   0,
+                                   id);
     }
     return make_value(container.front().source(), value);
 }
@@ -74,7 +75,7 @@ void Memory::set(uintptr_t address, Value const &value)
             values[i] = make_symbolic_value(value.source(), 1);
             first_symbol_id ^= values[i].symbol().id();
         }
-        values[0] = make_symbolic_value(value.source(), first_symbol_id, 1);
+        values[0] = make_symbolic_value(value.source(), 1, 0, first_symbol_id);
     }
     set(address, values);
 }

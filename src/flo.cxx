@@ -475,11 +475,11 @@ virt::Value Flo::emulate_instruction_helper(
     virt::Value const &src,
     std::function<uintptr_t(uintptr_t, uintptr_t)> action)
 {
-    uintptr_t mask = ~0;
-    if (dst.size() < 8) {
-        mask = (1ULL << (dst.size() * 8)) - 1;
-    }
     if (!dst.is_symbolic() && !src.is_symbolic()) {
+        uintptr_t mask = ~0;
+        if (dst.size() < 8) {
+            mask = (1ULL << (dst.size() * 8)) - 1;
+        }
         if (dst.size() < 4) {
             return virt::make_value(
                 src.source(),
@@ -492,6 +492,12 @@ virt::Value Flo::emulate_instruction_helper(
                                     action(dst.value(), src.value()) & mask,
                                     dst.size());
         }
+    }
+    else if (dst.is_symbolic() && !src.is_symbolic()) {
+        return virt::make_symbolic_value(src.source(),
+                                         dst.size(),
+                                         action(dst.symbol().offset(), src.value()),
+                                         dst.symbol().id());
     }
     return virt::make_symbolic_value(src.source(), dst.size());
 }

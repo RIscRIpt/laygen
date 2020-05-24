@@ -64,7 +64,7 @@ namespace rstc {
         inline size_t get_caller_id() const { return caller_id_; }
 
     private:
-        void set_all_registers_zero(Address source);
+        void set_all_registers_symbolic(Address source);
 
         size_t hash_;
         size_t id_;
