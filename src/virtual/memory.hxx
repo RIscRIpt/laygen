@@ -20,7 +20,7 @@ namespace rstc::virt {
             operator Value() const;
         };
 
-        Memory(Address source);
+        Memory(std::nullptr_t);
         Memory(Memory const *parent);
 
         Memory(Memory const &) = delete;

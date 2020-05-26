@@ -36,8 +36,10 @@ Flo *Reflo::get_flo_by_address(Address address)
     if (flos_.empty()) {
         return nullptr;
     }
-    auto it = std::prev(flos_.upper_bound(address));
-    return it->second.get();
+    if (auto it = flos_.upper_bound(address); it != flos_.begin()) {
+        return std::prev(it)->second.get();
+    }
+    return nullptr;
 }
 
 std::pair<Address, Address> Reflo::get_analyzed_bounds() const

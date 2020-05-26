@@ -45,8 +45,8 @@ Memory::Values::operator Value() const
     return make_value(container.front().source(), value);
 }
 
-Memory::Memory(Address source)
-    : default_source_(source)
+Memory::Memory(std::nullptr_t)
+    : default_source_(nullptr)
     , holder_(std::make_shared<Holder>())
 {
 }

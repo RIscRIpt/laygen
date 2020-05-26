@@ -31,16 +31,14 @@ namespace rstc {
         Contexts make_flo_initial_contexts(Flo &flo);
 
         template<typename CS>
-        static Contexts make_child_contexts(CS const &parents,
-                                            Context::ParentRole parent_role)
+        static Contexts make_child_contexts(CS const &parents)
         {
             Contexts child_contexts;
-            std::transform(parents.begin(),
-                           parents.end(),
-                           std::inserter(child_contexts, child_contexts.end()),
-                           std::bind(&Context::make_child,
-                                     std::placeholders::_1,
-                                     parent_role));
+            std::transform(
+                parents.begin(),
+                parents.end(),
+                std::inserter(child_contexts, child_contexts.end()),
+                std::bind(&Context::make_child, std::placeholders::_1));
             return child_contexts;
         }
 

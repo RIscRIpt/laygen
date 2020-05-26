@@ -40,21 +40,16 @@ namespace rstc {
         {
             auto result = std::move(
                 container_.extract(std::prev(container_.end())).value());
-            context_by_id_.erase(result.get_id());
             return result;
         }
         inline auto insert(iterator where, Context &&context)
         {
             auto it = container_.insert(where, std::move(context));
-            context_by_id_.insert_or_assign(it->get_id(), &*it);
             return it;
         }
         inline auto insert(Context &&context)
         {
             auto [it, inserted] = container_.insert(std::move(context));
-            if (inserted) {
-                context_by_id_.insert_or_assign(it->get_id(), &*it);
-            }
             return std::make_pair(it, inserted);
         }
         inline auto emplace(Context &&context)
@@ -64,23 +59,10 @@ namespace rstc {
         inline void merge(Contexts &&contexts)
         {
             container_.merge(std::move(contexts.container_));
-            context_by_id_.clear();
-            for (auto const &context : container_) {
-                context_by_id_.insert_or_assign(context.get_id(), &context);
-            }
-        }
-
-        inline Context const *get_context_by_id(size_t id) const
-        {
-            if (auto it = context_by_id_.find(id); it != context_by_id_.end()) {
-                return it->second;
-            }
-            return nullptr;
         }
 
     private:
         Container container_;
-        std::unordered_map<size_t, Context const *> context_by_id_;
     };
 
 }

@@ -10,23 +10,18 @@
 
 using namespace rstc;
 
-static std::atomic<size_t> GLOBAL_ID = 0;
-
-Context::Context(Address source)
+Context::Context(std::nullptr_t)
     : hash_(0)
-    , id_(++GLOBAL_ID)
-    , caller_id_(0)
     , registers_()
-    , memory_(source)
+    , memory_(nullptr)
 {
-    set_all_registers_symbolic(source);
+    for (auto const &[zydis_reg, reg] : virt::Registers::register_map) {
+        set_register(zydis_reg, virt::make_symbolic_value(nullptr));
+    }
 }
 
-Context::Context(Context const *parent, ParentRole parent_role)
+Context::Context(Context const *parent)
     : hash_(parent->hash_)
-    , id_(++GLOBAL_ID)
-    , caller_id_(parent_role == ParentRole::Caller ? parent->id_ :
-                                                     parent->caller_id_)
     , registers_(&parent->registers_)
     , memory_(&parent->memory_)
 {
@@ -71,19 +66,12 @@ void Context::set_register(ZydisRegister reg, virt::Value value)
     registers_.set(reg, value);
 }
 
-void Context::set_all_registers_symbolic(Address source)
-{
-    for (auto const &[zydis_reg, reg] : virt::Registers::register_map) {
-        set_register(zydis_reg, virt::make_symbolic_value(source));
-    }
-}
-
 void Context::set_memory(uintptr_t address, virt::Value value)
 {
     memory_.set(address, value);
 }
 
-Context Context::make_child(ParentRole parent_role) const
+Context Context::make_child() const
 {
-    return Context(this, parent_role);
+    return Context(this);
 }

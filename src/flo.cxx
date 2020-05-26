@@ -225,7 +225,7 @@ Flo::ContextPropagationResult Flo::propagate_contexts(Address address,
     result.instruction = &*it_instr->second;
     while (!contexts.empty()) {
         auto const &context = emplace_context(address, contexts.pop());
-        auto new_context = context.make_child(Context::ParentRole::Default);
+        auto new_context = context.make_child();
         emulate(address, *result.instruction, new_context);
         result.new_contexts.emplace(std::move(new_context));
     }

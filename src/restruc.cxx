@@ -211,12 +211,11 @@ void Restruc::propagate_contexts(Flo &flo,
                 if (dst >= address || !flo.is_inside(dst)) {
                     continue;
                 }
-                propagate_contexts(
-                    flo,
-                    make_child_contexts(contexts, Context::ParentRole::Default),
-                    dst,
-                    address,
-                    visited);
+                propagate_contexts(flo,
+                                   make_child_contexts(contexts),
+                                   dst,
+                                   address,
+                                   visited);
             }
             if (unconditional_jump) {
                 break;
@@ -239,7 +238,8 @@ void Restruc::propagate_contexts(Flo &flo,
             if (!flo.is_inside(address)) {
                 break;
             }
-            auto jumps = utils::multimap_values(flo.get_inner_jumps().equal_range(address));
+            auto jumps = utils::multimap_values(
+                flo.get_inner_jumps().equal_range(address));
             assert(jumps.begin() != jumps.end());
 #ifdef NDEBUG
             if (jumps.begin() == jumps.end()) {
@@ -247,15 +247,16 @@ void Restruc::propagate_contexts(Flo &flo,
             }
 #endif
             auto src = std::prev(jumps.end())->src;
-            auto jump_contexts = utils::multimap_values(flo.get_contexts().equal_range(src));
-            contexts = make_child_contexts(jump_contexts, Context::ParentRole::Default);
+            auto jump_contexts =
+                utils::multimap_values(flo.get_contexts().equal_range(src));
+            contexts = make_child_contexts(jump_contexts);
         }
     }
 }
 
 Contexts Restruc::make_flo_initial_contexts(Flo &flo)
 {
-    auto c = Context(flo.entry_point);
+    auto c = Context(nullptr);
     c.set_register(ZYDIS_REGISTER_RSP,
                    virt::make_value(flo.entry_point, 0xFF10000000000000));
     Contexts contexts;
@@ -267,19 +268,19 @@ void Restruc::update_contexts_after_unknown_call(Contexts &contexts,
                                                  Address caller)
 {
     Contexts new_contexts;
-    std::transform(
-        contexts.begin(),
-        contexts.end(),
-        std::inserter(new_contexts, new_contexts.end()),
-        [caller](Context const &context) {
-            auto new_context = context.make_child(Context::ParentRole::Default);
-            // Reset vlatile registers
-            for (auto volatile_register : VOLATILE_REGISTERS) {
-                new_context.set_register(volatile_register,
-                                         virt::make_symbolic_value(caller));
-            }
-            return new_context;
-        });
+    std::transform(contexts.begin(),
+                   contexts.end(),
+                   std::inserter(new_contexts, new_contexts.end()),
+                   [caller](Context const &context) {
+                       auto new_context = context.make_child();
+                       // Reset vlatile registers
+                       for (auto volatile_register : VOLATILE_REGISTERS) {
+                           new_context.set_register(
+                               volatile_register,
+                               virt::make_symbolic_value(caller));
+                       }
+                       return new_context;
+                   });
     contexts = std::move(new_contexts);
 }
 
