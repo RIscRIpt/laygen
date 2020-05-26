@@ -21,8 +21,6 @@ namespace rstc {
         void run_analysis(Flo &flo);
         void wait_for_analysis();
 
-        void wait_before_analysis_run();
-
         void
         propagate_contexts(Flo &flo,
                            Contexts contexts,
@@ -46,11 +44,8 @@ namespace rstc {
             return child_contexts;
         }
 
-        static void merge_contexts(Contexts &dst, Contexts contexts);
         static void update_contexts_after_unknown_call(Contexts &contexts,
                                                        Address caller);
-        static void set_contexts_after_call(Contexts &contexts,
-                                            Contexts const &next_contexts);
         static bool
         instruction_has_memory_access(ZydisDecodedInstruction const &instr);
         static bool operand_has_memory_access(ZydisDecodedOperand const &op);

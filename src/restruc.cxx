@@ -82,18 +82,13 @@ void Restruc::set_max_analyzing_threads(size_t amount)
     max_analyzing_threads_ = amount;
 }
 
-void Restruc::wait_before_analysis_run()
+void Restruc::run_analysis(Flo &flo)
 {
     auto lock = std::unique_lock(analyzing_threads_mutex_);
     analyzing_threads_cv_.wait(lock, [this] {
         return analyzing_threads_count_ < max_analyzing_threads_;
     });
     ++analyzing_threads_count_;
-}
-
-void Restruc::run_analysis(Flo &flo)
-{
-    wait_before_analysis_run();
     analyzing_threads_.emplace_back([this, &flo]() mutable {
         ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
             --analyzing_threads_count_;
@@ -268,11 +263,6 @@ Contexts Restruc::make_flo_initial_contexts(Flo &flo)
     return contexts;
 }
 
-void Restruc::merge_contexts(Contexts &dst, Contexts contexts)
-{
-    dst.merge(std::move(contexts));
-}
-
 void Restruc::update_contexts_after_unknown_call(Contexts &contexts,
                                                  Address caller)
 {
@@ -291,33 +281,6 @@ void Restruc::update_contexts_after_unknown_call(Contexts &contexts,
             return new_context;
         });
     contexts = std::move(new_contexts);
-}
-
-void rstc::Restruc::set_contexts_after_call(Contexts &contexts,
-                                            Contexts const &next_contexts)
-{
-    // Revert non-volatile registers
-    Contexts reverted_contexts;
-    std::transform(
-        next_contexts.begin(),
-        next_contexts.end(),
-        std::inserter(reverted_contexts, reverted_contexts.end()),
-        [&contexts](Context const &context) {
-            auto new_context = context.make_child(Context::ParentRole::Default);
-            auto caller_context =
-                contexts.get_context_by_id(context.get_caller_id());
-            if (caller_context) {
-                for (auto nonvolatile_register : NONVOLATILE_REGISTERS) {
-                    if (auto valsrc =
-                            caller_context->get_register(nonvolatile_register);
-                        valsrc) {
-                        new_context.set_register(nonvolatile_register, *valsrc);
-                    }
-                }
-            }
-            return new_context;
-        });
-    contexts = std::move(reverted_contexts);
 }
 
 bool Restruc::instruction_has_memory_access(
