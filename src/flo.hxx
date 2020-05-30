@@ -37,14 +37,12 @@ namespace rstc {
     using Jumps = std::multimap<Address, Jump>;
 
     struct Call : public Jump {
-        Call(Address dst, Address src, Address ret, int args = -1)
+        Call(Address dst, Address src, Address ret)
             : Jump(Jump::Outer, dst, src)
             , ret(ret)
-            , args(args == -1 ? std::optional<int>(std::nullopt) : args)
         {
         }
         Address const ret;
-        std::optional<int> args;
     };
 
     // Destination -> Call
