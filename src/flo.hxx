@@ -183,6 +183,10 @@ namespace rstc {
         void emulate_instruction_ret(ZydisDecodedInstruction const &instruction,
                                      Context &context,
                                      Address address);
+        void emulate_instruction_inc(ZydisDecodedInstruction const &instruction,
+                                     Context &context,
+                                     Address address,
+                                     int offset);
         static virt::Value emulate_instruction_helper(
             virt::Value const &dst,
             virt::Value const &src,

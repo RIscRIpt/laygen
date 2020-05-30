@@ -313,6 +313,12 @@ void Flo::emulate(Address address,
     case ZYDIS_MNEMONIC_RET:
         emulate_instruction_ret(instruction, context, address);
         break;
+    case ZYDIS_MNEMONIC_INC:
+        emulate_instruction_inc(instruction, context, address, +1);
+        break;
+    case ZYDIS_MNEMONIC_DEC:
+        emulate_instruction_inc(instruction, context, address, -1);
+        break;
     default:
         for (size_t i = 0; i < instruction.operand_count; i++) {
             auto const &op = instruction.operands[i];
@@ -467,6 +473,32 @@ void Flo::emulate_instruction_ret(ZydisDecodedInstruction const &instruction,
         auto new_rsp = rsp->value() + 8;
         context.set_register(ZYDIS_REGISTER_RSP,
                              virt::make_value(address, new_rsp));
+    }
+}
+
+void Flo::emulate_instruction_inc(ZydisDecodedInstruction const &instruction,
+                                  Context &context,
+                                  Address address,
+                                  int offset)
+{
+    assert(instruction.mnemonic == ZYDIS_MNEMONIC_INC
+           || instruction.mnemonic == ZYDIS_MNEMONIC_DEC);
+    Operand dst = get_operand(instruction.operands[0], context, address);
+    virt::Value result;
+    if (!dst.value.is_symbolic()) {
+        result = virt::make_value(address, dst.value.value() + offset);
+    }
+    else {
+        result = virt::make_symbolic_value(address,
+                                           8,
+                                           dst.value.symbol().offset() + offset,
+                                           dst.value.symbol().id());
+    }
+    if (dst.reg != ZYDIS_REGISTER_NONE) {
+        context.set_register(dst.reg, result);
+    }
+    else if (dst.address) {
+        context.set_memory(*dst.address, result);
     }
 }
 
