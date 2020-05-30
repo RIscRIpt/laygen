@@ -122,7 +122,8 @@ void Restruc::propagate_contexts(Flo &flo,
 {
     bool new_basic_block = true;
     if (!end) {
-        end = flo.get_disassembly().rbegin()->first;
+        auto last_instr = flo.get_disassembly().rbegin();
+        end = last_instr->first + last_instr->second->length;
     }
     // Visit visited instructions without going deeper.
     while (address && address < end && !contexts.empty()
