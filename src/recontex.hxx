@@ -8,9 +8,9 @@
 
 namespace rstc {
 
-    class Restruc {
+    class Recontex {
     public:
-        Restruc(Reflo &reflo);
+        Recontex(Reflo &reflo);
 
         void analyze();
         void set_max_analyzing_threads(size_t amount);

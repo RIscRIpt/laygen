@@ -1,4 +1,4 @@
-#include "restruc.hxx"
+#include "recontex.hxx"
 
 #include "dumper.hxx"
 #include "scope_guard.hxx"
@@ -56,14 +56,14 @@ void dump_register_value(std::ostream &os,
 
 #endif
 
-Restruc::Restruc(Reflo &reflo)
+Recontex::Recontex(Reflo &reflo)
     : reflo_(reflo)
     , pe_(reflo.get_pe())
     , max_analyzing_threads_(std::thread::hardware_concurrency())
 {
 }
 
-void Restruc::analyze()
+void Recontex::analyze()
 {
     for (auto const &[address, flo] : reflo_.get_flos()) {
         run_analysis(*flo);
@@ -77,12 +77,12 @@ void Restruc::analyze()
 #endif
 }
 
-void Restruc::set_max_analyzing_threads(size_t amount)
+void Recontex::set_max_analyzing_threads(size_t amount)
 {
     max_analyzing_threads_ = amount;
 }
 
-void Restruc::run_analysis(Flo &flo)
+void Recontex::run_analysis(Flo &flo)
 {
     auto lock = std::unique_lock(analyzing_threads_mutex_);
     analyzing_threads_cv_.wait(lock, [this] {
@@ -106,7 +106,7 @@ void Restruc::run_analysis(Flo &flo)
     });
 }
 
-void Restruc::wait_for_analysis()
+void Recontex::wait_for_analysis()
 {
     std::for_each(analyzing_threads_.begin(),
                   analyzing_threads_.end(),
@@ -114,7 +114,7 @@ void Restruc::wait_for_analysis()
     analyzing_threads_.clear();
 }
 
-void Restruc::propagate_contexts(Flo &flo,
+void Recontex::propagate_contexts(Flo &flo,
                                  Contexts contexts,
                                  Address address,
                                  Address end,
@@ -255,7 +255,7 @@ void Restruc::propagate_contexts(Flo &flo,
     }
 }
 
-Contexts Restruc::make_flo_initial_contexts(Flo &flo)
+Contexts Recontex::make_flo_initial_contexts(Flo &flo)
 {
     auto c = Context(nullptr);
     c.set_register(ZYDIS_REGISTER_RSP,
@@ -265,7 +265,7 @@ Contexts Restruc::make_flo_initial_contexts(Flo &flo)
     return contexts;
 }
 
-void Restruc::update_contexts_after_unknown_call(Contexts &contexts,
+void Recontex::update_contexts_after_unknown_call(Contexts &contexts,
                                                  Address caller)
 {
     Contexts new_contexts;
@@ -285,7 +285,7 @@ void Restruc::update_contexts_after_unknown_call(Contexts &contexts,
     contexts = std::move(new_contexts);
 }
 
-bool Restruc::instruction_has_memory_access(
+bool Recontex::instruction_has_memory_access(
     ZydisDecodedInstruction const &instr)
 {
     return std::any_of(instr.operands,
@@ -293,13 +293,13 @@ bool Restruc::instruction_has_memory_access(
                        operand_has_memory_access);
 }
 
-bool Restruc::operand_has_memory_access(ZydisDecodedOperand const &op)
+bool Recontex::operand_has_memory_access(ZydisDecodedOperand const &op)
 {
     return op.type == ZYDIS_OPERAND_TYPE_MEMORY
            && op.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT;
 }
 
-bool Restruc::instruction_has_nonstack_memory_access(
+bool Recontex::instruction_has_nonstack_memory_access(
     ZydisDecodedInstruction const &instr)
 {
     return std::any_of(instr.operands,
@@ -307,7 +307,7 @@ bool Restruc::instruction_has_nonstack_memory_access(
                        operand_has_nonstack_memory_access);
 }
 
-bool Restruc::operand_has_nonstack_memory_access(ZydisDecodedOperand const &op)
+bool Recontex::operand_has_nonstack_memory_access(ZydisDecodedOperand const &op)
 {
     return op.type == ZYDIS_OPERAND_TYPE_MEMORY
            && op.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT
@@ -315,7 +315,7 @@ bool Restruc::operand_has_nonstack_memory_access(ZydisDecodedOperand const &op)
            && op.mem.index != ZYDIS_REGISTER_RSP;
 }
 
-bool Restruc::is_history_term_instr(ZydisDecodedInstruction const &instr)
+bool Recontex::is_history_term_instr(ZydisDecodedInstruction const &instr)
 {
     if (instr.mnemonic == ZYDIS_MNEMONIC_XOR) {
         auto const &dst = instr.operands[0];
@@ -328,7 +328,7 @@ bool Restruc::is_history_term_instr(ZydisDecodedInstruction const &instr)
     return false;
 }
 
-void Restruc::debug(std::ostream &os)
+void Recontex::debug(std::ostream &os)
 {
     Dumper dumper;
     for (auto const &[entry_point, flo] : reflo_.get_flos()) {
@@ -349,7 +349,7 @@ void Restruc::debug(std::ostream &os)
     }
 }
 
-void Restruc::dump_register_history(std::ostream &os,
+void Recontex::dump_register_history(std::ostream &os,
                                     Dumper const &dumper,
                                     Context const &context,
                                     ZydisRegister reg,
@@ -382,7 +382,7 @@ void Restruc::dump_register_history(std::ostream &os,
     }
 }
 
-void Restruc::dump_memory_history(std::ostream &os,
+void Recontex::dump_memory_history(std::ostream &os,
                                   Dumper const &dumper,
                                   Context const &context,
                                   ZydisDecodedOperand const &op,
@@ -411,7 +411,7 @@ void Restruc::dump_memory_history(std::ostream &os,
     }
 }
 
-void Restruc::dump_instruction_history(
+void Recontex::dump_instruction_history(
     std::ostream &os,
     Dumper const &dumper,
     Address address,

@@ -1,5 +1,5 @@
 #include "reflo.hxx"
-#include "restruc.hxx"
+#include "recontex.hxx"
 
 #include <iomanip>
 #include <iostream>
@@ -7,7 +7,7 @@
 int wmain(int argc, wchar_t *argv[])
 {
     if (argc != 2) {
-        std::cerr << "restruct.exe <filename>\n";
+        std::cerr << "recontext.exe <filename>\n";
         return EXIT_FAILURE;
     }
 
@@ -16,7 +16,7 @@ int wmain(int argc, wchar_t *argv[])
 #endif
     {
         rstc::Reflo reflo(argv[1]);
-        rstc::Restruc restruc(reflo);
+        rstc::Recontex recontex(reflo);
 
         std::cout << "Reflo::analyze ...\n";
         reflo.analyze();
@@ -24,10 +24,10 @@ int wmain(int argc, wchar_t *argv[])
         std::cout << std::setfill('0') << "Analyzed: [" << std::hex
                   << std::setw(8) << analyzed.first << "; " << std::hex
                   << std::setw(8) << analyzed.second << "]\n";
-        restruc.set_max_analyzing_threads(1);
-        std::cout << "Restruc::analyze ...\n";
-        restruc.analyze();
-        restruc.debug(std::cout);
+        recontex.set_max_analyzing_threads(1);
+        std::cout << "Recontex::analyze ...\n";
+        recontex.analyze();
+        recontex.debug(std::cout);
     }
 #ifdef NDEBUG
     catch (std::exception const &e) {
