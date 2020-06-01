@@ -2,8 +2,8 @@
 
 #include "core.hxx"
 
-#include <random>
 #include <optional>
+#include <random>
 #include <variant>
 
 namespace rstc::virt {
@@ -50,5 +50,9 @@ namespace rstc::virt {
     };
 
     Value make_value(Address source, uintptr_t value, int size = 8);
-    Value make_symbolic_value(Address source, int size = 8, intptr_t offset = 0, uintptr_t id = 0);
+    Value make_symbolic_value(Address source,
+                              int size = 8,
+                              intptr_t offset = 0,
+                              uintptr_t id = 0);
+
 }
