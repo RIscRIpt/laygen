@@ -395,7 +395,7 @@ void Recontex::dump_memory_history(std::ostream &os,
             sources.emplace(value.source());
         }
         for (auto source : sources) {
-            if (source == pe_.get_entry_point() || visited.contains(source)) {
+            if (visited.contains(source)) {
                 continue;
             }
             if (auto flo = reflo_.get_flo_by_address(source); flo) {
