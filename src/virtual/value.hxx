@@ -43,6 +43,20 @@ namespace rstc::virt {
         inline void set_source(Address source) { source_ = source; }
         inline void set_size(int size) { size_ = size; }
 
+        inline uintptr_t raw_value() const
+        {
+            if (is_symbolic()) {
+                auto const &s = symbol();
+                return s.id() + s.offset();
+            }
+            return value();
+        }
+
+        inline bool operator<(Value const& rhs) const
+        {
+            return raw_value() < rhs.raw_value();
+        }
+
     private:
         Address source_;
         ValueContainer value_;

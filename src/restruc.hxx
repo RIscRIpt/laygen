@@ -16,6 +16,8 @@ namespace rstc {
         void debug(std::ostream &os);
 
     private:
+        using InstructionGroups = std::map<virt::Value, std::vector<Address>>;
+
         void run_analysis(Flo &flo);
         void wait_for_analysis();
 

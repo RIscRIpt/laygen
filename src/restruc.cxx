@@ -3,6 +3,7 @@
 #include "dumper.hxx"
 #include "scope_guard.hxx"
 #include "utils/adapters.hxx"
+#include "utils/hash.hxx"
 
 #include <iostream>
 
@@ -81,33 +82,7 @@ void Restruc::analyze_flo(Flo &flo)
     Dumper dumper;
     DWORD va = pe_.raw_to_virtual_address(address);
 #endif
-    auto value_similarity_hash = [](virt::Value const &value) {
-        size_t hash = 0;
-        rstc::utils::hash_combine(hash, value.size());
-        rstc::utils::hash_combine(hash, value.is_symbolic());
-        if (!value.is_symbolic()) {
-            rstc::utils::hash_combine(hash, value.value());
-        }
-        else {
-            rstc::utils::hash_combine(hash, value.symbol().id());
-            rstc::utils::hash_combine(hash, value.symbol().offset());
-        }
-        return hash;
-    };
-    auto value_similarity = [](virt::Value const &lhs, virt::Value const &rhs) {
-        if (lhs.is_symbolic() != rhs.is_symbolic()) {
-            return false;
-        }
-        if (lhs.is_symbolic()) {
-            return lhs.symbol().id() == rhs.symbol().id();
-        }
-        return lhs.value() == rhs.value();
-    };
-    std::unordered_map<virt::Value,
-                       std::vector<Address>,
-                       decltype(value_similarity_hash),
-                       decltype(value_similarity)>
-        groups(4, value_similarity_hash, value_similarity);
+    InstructionGroups groups;
     while (address < end) {
         visited.emplace(address);
         auto const &instruction = *disassembly.at(address);
