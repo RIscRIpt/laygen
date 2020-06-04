@@ -2,14 +2,70 @@
 
 #include "dumper.hxx"
 #include "scope_guard.hxx"
+#include "struc.hxx"
 #include "utils/adapters.hxx"
 #include "utils/hash.hxx"
 
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 
 using namespace rstc;
 
 #define DEBUG_ANALYSIS
+
+static std::string generate_struc_name(virt::Value const &value)
+{
+    std::ostringstream oss;
+    oss << "rs_" << std::setfill('0') << std::hex << std::setw(16)
+        << value.raw_value();
+    return oss.str();
+}
+
+static void add_struc_field(Struc &struc,
+                            ZydisDecodedInstruction const &instruction)
+{
+    ZydisDecodedOperand const *mem_op = nullptr;
+    for (ZyanU8 i = 0; i < instruction.operand_count; i++) {
+        auto const &op = instruction.operands[i];
+        if (op.type == ZYDIS_OPERAND_TYPE_MEMORY
+            && op.visibility == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
+            mem_op = &op;
+            break; // (assume) explicit memory operand can be only one
+        }
+    }
+    if (!mem_op) {
+        return;
+    }
+    size_t offset = 0;
+    if (mem_op->mem.disp.has_displacement) {
+        if (mem_op->mem.disp.value < 0) {
+            return;
+        }
+        offset = mem_op->mem.disp.value;
+    }
+    size_t size = 8;
+    if (mem_op->element_size) {
+        size = mem_op->element_size / 8;
+    }
+    switch (mem_op->element_type) {
+    case ZYDIS_ELEMENT_TYPE_FLOAT16:
+    case ZYDIS_ELEMENT_TYPE_FLOAT32:
+    case ZYDIS_ELEMENT_TYPE_FLOAT64:
+    case ZYDIS_ELEMENT_TYPE_FLOAT80:
+        //
+        struc.add_float_field(offset, size);
+        break;
+    case ZYDIS_ELEMENT_TYPE_UINT:
+        //
+        struc.add_int_field(offset, size, Struc::Field::Unsigned);
+        break;
+    default:
+        //
+        struc.add_int_field(offset, size, Struc::Field::Signed);
+        break;
+    }
+}
 
 Restruc::Restruc(Reflo &reflo)
     : reflo_(reflo)
@@ -124,12 +180,16 @@ void Restruc::analyze_flo(Flo &flo)
                           << std::hex << std::setw(4) << value.symbol().offset()
                           << "]:\n";
             }
+            Struc struc(generate_struc_name(value));
             for (auto const address : addresses) {
                 auto const &instruction = *disassembly.at(address);
+                add_struc_field(struc, instruction);
                 dumper.dump_instruction(std::clog,
                                         pe_.raw_to_virtual_address(address),
                                         instruction);
             }
+            std::clog << '\n';
+            print_struc(std::clog, struc);
             std::clog << '\n';
         }
         std::clog << '\n';
