@@ -1,6 +1,8 @@
 #pragma once
 
+#include <iosfwd>
 #include <map>
+#include <string>
 
 namespace rstc {
 
@@ -37,6 +39,8 @@ namespace rstc {
             Type type_;
         };
 
+        Struc(std::string name);
+
         void add_int_field(size_t offset, size_t size, size_t count = 1);
         void add_float_field(size_t offset, size_t size, size_t count = 1);
         void add_pointer_field(size_t offset,
@@ -44,6 +48,8 @@ namespace rstc {
                                const Struc *struc = nullptr);
         void
         add_struc_field(size_t offset, const Struc *struc, size_t count = 1);
+
+        inline std::string const &name() const { return name_; }
 
         size_t get_size() const;
 
@@ -55,7 +61,11 @@ namespace rstc {
         static constexpr const Struc *const Atomic = nullptr;
 
     private:
+        std::string name_;
         std::multimap<size_t, Field> fields_;
     };
+
+    void
+    print_struc(std::ostream &os, Struc const &struc);
 
 }
