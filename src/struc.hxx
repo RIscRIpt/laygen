@@ -13,10 +13,16 @@ namespace rstc {
             friend class Struc;
 
             enum Type {
+                UInt,
                 Int,
                 Float,
                 Pointer,
                 Struc,
+            };
+
+            enum Signedness : bool {
+                Unsigned,
+                Signed,
             };
 
             inline Type type() const { return type_; }
@@ -25,15 +31,21 @@ namespace rstc {
                 return type_ != Struc ? size_ : struc_->get_size();
             }
             inline size_t count() const { return count_; }
-            inline const class Struc *struc() const { return struc_; }
+            inline class Struc const *struc() const { return struc_; }
+
+            inline bool operator==(Field const &rhs) const
+            {
+                return type_ == rhs.type_ && size_ == rhs.size_ && count_
+                       && rhs.count_ && struc_ == rhs.struc_;
+            }
 
         private:
             Field(Type type,
                   size_t size,
                   size_t count,
-                  const class Struc *struc);
+                  class Struc const *struc);
 
-            const class Struc *struc_;
+            class Struc const *struc_;
             size_t size_;
             size_t count_;
             Type type_;
@@ -41,13 +53,16 @@ namespace rstc {
 
         Struc(std::string name);
 
-        void add_int_field(size_t offset, size_t size, size_t count = 1);
+        void add_int_field(size_t offset,
+                           size_t size,
+                           Field::Signedness signedness = Field::Unsigned,
+                           size_t count = 1);
         void add_float_field(size_t offset, size_t size, size_t count = 1);
         void add_pointer_field(size_t offset,
                                size_t count = 1,
-                               const Struc *struc = nullptr);
+                               Struc const *struc = nullptr);
         void
-        add_struc_field(size_t offset, const Struc *struc, size_t count = 1);
+        add_struc_field(size_t offset, Struc const *struc, size_t count = 1);
 
         inline std::string const &name() const { return name_; }
 
@@ -58,14 +73,15 @@ namespace rstc {
             return fields_;
         }
 
-        static constexpr const Struc *const Atomic = nullptr;
+        static constexpr Struc const *const Atomic = nullptr;
 
     private:
+        bool is_duplicate(size_t offset, Field const &field) const;
+
         std::string name_;
         std::multimap<size_t, Field> fields_;
     };
 
-    void
-    print_struc(std::ostream &os, Struc const &struc);
+    void print_struc(std::ostream &os, Struc const &struc);
 
 }

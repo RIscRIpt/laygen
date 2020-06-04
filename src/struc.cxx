@@ -12,7 +12,7 @@ using namespace rstc;
 Struc::Field::Field(Type type,
                     size_t size,
                     size_t count,
-                    const class Struc *struc)
+                    class Struc const *struc)
     : struc_(struc)
     , size_(size)
     , count_(count)
@@ -25,39 +25,45 @@ Struc::Struc(std::string name)
 {
 }
 
-void Struc::add_int_field(size_t offset, size_t size, size_t count)
+void Struc::add_int_field(size_t offset,
+                          size_t size,
+                          Field::Signedness signedness,
+                          size_t count)
 {
     // Is 1, 2, 4, 8, 16, 32, 64
     assert(size > 0 && (size & (size - 1)) == 0 && size <= 64);
-    fields_.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(offset),
-        std::forward_as_tuple(Field(Field::Int, size, count, Atomic)));
+    Field field(signedness == Field::Unsigned ? Field::UInt : Field::Int,
+                size,
+                count,
+                Atomic);
+    if (!is_duplicate(offset, field)) {
+        fields_.emplace(offset, std::move(field));
+    }
 }
 
 void Struc::add_float_field(size_t offset, size_t size, size_t count)
 {
-    assert(size >= 4 && (size & (size - 1)) == 0 && size <= 8);
-    fields_.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(offset),
-        std::forward_as_tuple(Field(Field::Float, size, count, Atomic)));
+    assert(size == 2 || size == 4 || size == 8 || size == 10);
+    Field field(Field::Float, size, count, Atomic);
+    if (!is_duplicate(offset, field)) {
+        fields_.emplace(offset, std::move(field));
+    }
 }
 
-void Struc::add_pointer_field(size_t offset, size_t count, const Struc *struc)
+void Struc::add_pointer_field(size_t offset, size_t count, Struc const *struc)
 {
-    fields_.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(offset),
-        std::forward_as_tuple(Field(Field::Pointer, 8, count, struc)));
+    Field field(Field::Pointer, 8, count, struc);
+    if (!is_duplicate(offset, field)) {
+        fields_.emplace(offset, std::move(field));
+    }
 }
 
-void Struc::add_struc_field(size_t offset, const Struc *struc, size_t count)
+void Struc::add_struc_field(size_t offset, Struc const *struc, size_t count)
 {
-    fields_.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(offset),
-        std::forward_as_tuple(Field(Field::Struc, 0, count, struc)));
+    Field field(Field::Struc, 0, count, struc);
+    if (!is_duplicate(offset, field)) {
+        fields_.emplace(offset, std::move(field));
+    }
 }
 
 size_t Struc::get_size() const
@@ -74,9 +80,24 @@ size_t Struc::get_size() const
     return last_offset + largest_last_field->size();
 }
 
+bool Struc::is_duplicate(size_t offset, Field const &field) const
+{
+    auto other_fields = utils::multimap_values(fields_.equal_range(offset));
+    auto it = std::find(other_fields.begin(), other_fields.end(), field);
+    return it != other_fields.end();
+}
+
 static std::string field_type_to_string(Struc::Field const &field)
 {
     switch (field.type()) {
+    case Struc::Field::UInt:
+        switch (field.size()) {
+        case 1: return "uint8_t";
+        case 2: return "uint16_t";
+        case 4: return "uint32_t";
+        case 8: return "uint64_t";
+        }
+        break;
     case Struc::Field::Int:
         switch (field.size()) {
         case 1: return "int8_t";
@@ -87,8 +108,10 @@ static std::string field_type_to_string(Struc::Field const &field)
         break;
     case Struc::Field::Float:
         switch (field.size()) {
+        case 2: return "f16_t";
         case 4: return "float";
         case 8: return "double";
+        case 10: return "long double";
         }
         break;
     case Struc::Field::Pointer:
@@ -123,7 +146,8 @@ void rstc::print_struc(std::ostream &os, Struc const &struc)
         auto it_end = std::next(it);
         while (it_end != fields.end()) {
             auto prev = std::prev(it_end);
-            auto offset = prev->first + prev->second.size() * prev->second.count();
+            auto offset =
+                prev->first + prev->second.size() * prev->second.count();
             if (offset <= it_end->first) {
                 break;
             }
