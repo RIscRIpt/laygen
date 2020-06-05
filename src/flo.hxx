@@ -112,6 +112,7 @@ namespace rstc {
         get_memory_address(ZydisDecodedOperand const &op,
                            Context const &context);
 
+        static bool is_any_jump(ZydisMnemonic mnemonic);
         static bool is_conditional_jump(ZydisMnemonic mnemonic);
 
         std::vector<Context const *> get_contexts(Address address) const;

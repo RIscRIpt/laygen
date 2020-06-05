@@ -49,8 +49,7 @@ Flo::AnalysisResult Flo::analyze(Address address, Instruction instr)
             return { Complete, next_address };
         }
     }
-    else if (instruction.mnemonic == ZYDIS_MNEMONIC_JMP
-             || is_conditional_jump(instruction.mnemonic)) {
+    else if (is_any_jump(instruction.mnemonic)) {
         bool unconditional = instruction.mnemonic == ZYDIS_MNEMONIC_JMP;
         Jump::Type type = Jump::Unknown;
         auto dst = get_jump_destination(address, instruction);
@@ -88,6 +87,11 @@ Flo::AnalysisResult Flo::analyze(Address address, Instruction instr)
     return { Next, next_address };
 }
 
+bool Flo::is_any_jump(ZydisMnemonic mnemonic)
+{
+    return mnemonic == ZYDIS_MNEMONIC_JMP || is_conditional_jump(mnemonic);
+}
+
 bool Flo::is_conditional_jump(ZydisMnemonic mnemonic)
 {
     switch (mnemonic) {
@@ -99,7 +103,6 @@ bool Flo::is_conditional_jump(ZydisMnemonic mnemonic)
     case ZYDIS_MNEMONIC_JKZD:
     case ZYDIS_MNEMONIC_JL:
     case ZYDIS_MNEMONIC_JLE:
-    case ZYDIS_MNEMONIC_JMP:
     case ZYDIS_MNEMONIC_JNB:
     case ZYDIS_MNEMONIC_JNBE:
     case ZYDIS_MNEMONIC_JNL:
@@ -693,8 +696,7 @@ bool Flo::is_inside(Address address) const
 Address Flo::get_jump_destination(Address address,
                                   ZydisDecodedInstruction const &instruction)
 {
-    assert(instruction.mnemonic == ZYDIS_MNEMONIC_JMP
-           || is_conditional_jump(instruction.mnemonic));
+    assert(is_any_jump(instruction.mnemonic));
     assert(instruction.operand_count > 0);
     auto const &op = instruction.operands[0];
     // TODO: Support more op.type-s.
@@ -711,8 +713,7 @@ Flo::get_jump_destinations(PE const &pe,
                            ZydisDecodedInstruction const &instruction,
                            Contexts const &contexts)
 {
-    assert(instruction.mnemonic == ZYDIS_MNEMONIC_JMP
-           || is_conditional_jump(instruction.mnemonic));
+    assert(is_any_jump(instruction.mnemonic));
     assert(instruction.operand_count > 0);
     std::unordered_set<Address> dsts;
     auto const &op = instruction.operands[0];
