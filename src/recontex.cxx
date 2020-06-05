@@ -201,8 +201,7 @@ void Recontex::propagate_contexts(Flo &flo,
         }
         else if (Flo::is_any_jump(instr->mnemonic)) {
             bool unconditional_jump = instr->mnemonic == ZYDIS_MNEMONIC_JMP;
-            auto dsts =
-                flo.get_jump_destinations(pe_, address, *instr, contexts);
+            auto dsts = flo.get_jump_destinations(address, *instr, contexts);
             for (auto dst : dsts) {
                 // Analyze only loops (inner backward jumps)
                 if (dst >= address || !flo.is_inside(dst)) {
@@ -213,6 +212,7 @@ void Recontex::propagate_contexts(Flo &flo,
                                    dst,
                                    address,
                                    visited);
+                flo.add_cycle(contexts, dst, address);
             }
             if (unconditional_jump) {
                 break;

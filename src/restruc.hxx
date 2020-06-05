@@ -13,7 +13,7 @@ namespace rstc {
         void analyze();
         void set_max_analyzing_threads(size_t amount);
 
-        void debug(std::ostream &os);
+        void dump(std::ostream &os);
 
     private:
         using InstructionGroups = std::map<virt::Value, std::vector<Address>>;

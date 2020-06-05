@@ -139,6 +139,21 @@ std::vector<Context const *> Flo::get_contexts(Address address) const
     return contexts;
 }
 
+std::vector<Cycle const *> Flo::get_cycles(Address address) const
+{
+    auto it = cycles_.lower_bound(address);
+    std::vector<Cycle const *> cycles;
+    while (it != cycles_.end()) {
+        auto const &cycle = it->second;
+        if (address < cycle.first || cycle.last < address) {
+            break;
+        }
+        cycles.push_back(&cycle);
+        ++it;
+    }
+    return cycles;
+}
+
 Flo::SPManipulationType Flo::analyze_stack_pointer_manipulation(
     ZydisDecodedInstruction const &instruction)
 {
@@ -529,10 +544,11 @@ virt::Value Flo::emulate_instruction_helper(
         }
     }
     else if (dst.is_symbolic() && !src.is_symbolic()) {
-        return virt::make_symbolic_value(src.source(),
-                                         dst.size(),
-                                         action(dst.symbol().offset(), src.value()),
-                                         dst.symbol().id());
+        return virt::make_symbolic_value(
+            src.source(),
+            dst.size(),
+            action(dst.symbol().offset(), src.value()),
+            dst.symbol().id());
     }
     return virt::make_symbolic_value(src.source(), dst.size());
 }
@@ -578,12 +594,68 @@ Flo::Operand Flo::get_operand(ZydisDecodedOperand const &operand,
     return op;
 }
 
-ZydisDecodedInstruction const *Flo::get_instruction(Address address) const
+bool Flo::modifies_flags_register(ZydisDecodedInstruction const &instruction)
 {
-    if (auto it = disassembly_.find(address); it != disassembly_.end()) {
-        return it->second.get();
+    return std::any_of(
+        instruction.operands,
+        instruction.operands + instruction.operand_count,
+        [](ZydisDecodedOperand const &op) {
+            if (op.type != ZYDIS_OPERAND_TYPE_REGISTER
+                || !(op.actions & ZYDIS_OPERAND_ACTION_MASK_WRITE)) {
+                return false;
+            }
+            switch (op.reg.value) {
+            case ZYDIS_REGISTER_FLAGS:
+            case ZYDIS_REGISTER_EFLAGS:
+            case ZYDIS_REGISTER_RFLAGS:
+                //
+                return true;
+            }
+            return false;
+        });
+}
+
+void Flo::add_cycle(Contexts const &contexts, Address first, Address last)
+{
+    assert(is_inside(first));
+    Cycle::ExitConditions exit_conditions;
+    auto it = disassembly_.find(first);
+    while (it->first < last) {
+        if (Flo::is_conditional_jump(it->second->mnemonic)) {
+            for (auto dst :
+                 get_jump_destinations(it->first, *it->second, contexts)) {
+                if (dst >= first && dst <= last) {
+                    // Jump is not outside cycle
+                    goto next;
+                }
+            }
+            auto jt = it;
+            for (; jt->first >= first; --jt) {
+                if (modifies_flags_register(*jt->second)) {
+                    exit_conditions.emplace_back(jt->second.get(),
+                                                 it->second->mnemonic);
+                    break;
+                }
+            }
+        }
+    next:
+        ++it;
     }
-    return nullptr;
+    assert(it->first == last);
+    if (Flo::is_conditional_jump(it->second->mnemonic)) {
+        auto jt = it;
+        for (; jt->first >= first; --jt) {
+            if (modifies_flags_register(*jt->second)) {
+                exit_conditions.emplace_back(jt->second.get(),
+                                             it->second->mnemonic);
+                break;
+            }
+        }
+    }
+    cycles_.emplace(
+        std::piecewise_construct,
+        std::forward_as_tuple(last),
+        std::forward_as_tuple(first, last, std::move(exit_conditions)));
 }
 
 void Flo::add_jump(Jump::Type type, Address dst, Address src)
@@ -708,8 +780,7 @@ Address Flo::get_jump_destination(Address address,
 }
 
 std::unordered_set<Address>
-Flo::get_jump_destinations(PE const &pe,
-                           Address address,
+Flo::get_jump_destinations(Address address,
                            ZydisDecodedInstruction const &instruction,
                            Contexts const &contexts)
 {
@@ -726,7 +797,7 @@ Flo::get_jump_destinations(PE const &pe,
         for (auto const &context : contexts) {
             if (auto va_dst = context.get_register(op.reg.value);
                 va_dst && !va_dst->is_symbolic()) {
-                if (auto dst = pe.virtual_to_raw_address(va_dst->value());
+                if (auto dst = pe_.virtual_to_raw_address(va_dst->value());
                     dst) {
                     dsts.emplace(dst);
                 }

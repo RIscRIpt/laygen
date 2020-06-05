@@ -23,7 +23,9 @@ static std::string generate_struc_name(virt::Value const &value)
 }
 
 static void add_struc_field(Struc &struc,
-                            ZydisDecodedInstruction const &instruction)
+                            std::vector<Context const *> const &contexts,
+                            ZydisDecodedInstruction const &instruction,
+                            std::vector<Cycle const *> const &cycles)
 {
     ZydisDecodedOperand const *mem_op = nullptr;
     for (ZyanU8 i = 0; i < instruction.operand_count; i++) {
@@ -48,21 +50,56 @@ static void add_struc_field(Struc &struc,
     if (mem_op->element_size) {
         size = mem_op->element_size / 8;
     }
+    size_t count = 1;
+    if (!cycles.empty() && mem_op->mem.index != ZYDIS_REGISTER_NONE) {
+        for (auto const &cycle : cycles) {
+            for (auto const &ec : cycle->exit_conditions) {
+                auto op1 = ec.instruction->operands[0];
+                auto op2 = ec.instruction->operands[1];
+                if (op1.type != ZYDIS_OPERAND_TYPE_REGISTER
+                    || op1.reg.value != mem_op->mem.index) {
+                    continue;
+                }
+                switch (ec.instruction->mnemonic) {
+                case ZYDIS_MNEMONIC_CMP:
+                    switch (op2.type) {
+                    case ZYDIS_OPERAND_TYPE_IMMEDIATE:
+                        if (!op2.imm.is_signed || op2.imm.value.s > 0) {
+                            count = max(count, op2.imm.value.u);
+                        }
+                        break;
+                    case ZYDIS_OPERAND_TYPE_REGISTER:
+                        for (auto const &context : contexts) {
+                            if (auto value =
+                                    context->get_register(op2.reg.value);
+                                value) {
+                                if (!value->is_symbolic()) {
+                                    count = max(count, value->value());
+                                }
+                            }
+                        }
+                        break;
+                    }
+                    break;
+                }
+            }
+        }
+    }
     switch (mem_op->element_type) {
     case ZYDIS_ELEMENT_TYPE_FLOAT16:
     case ZYDIS_ELEMENT_TYPE_FLOAT32:
     case ZYDIS_ELEMENT_TYPE_FLOAT64:
     case ZYDIS_ELEMENT_TYPE_FLOAT80:
         //
-        struc.add_float_field(offset, size);
+        struc.add_float_field(offset, size, count);
         break;
     case ZYDIS_ELEMENT_TYPE_UINT:
         //
-        struc.add_int_field(offset, size, Struc::Field::Unsigned);
+        struc.add_int_field(offset, size, Struc::Field::Unsigned, count);
         break;
     default:
         //
-        struc.add_int_field(offset, size, Struc::Field::Signed);
+        struc.add_int_field(offset, size, Struc::Field::Signed, count);
         break;
     }
 }
@@ -183,10 +220,12 @@ void Restruc::analyze_flo(Flo &flo)
             Struc struc(generate_struc_name(value));
             for (auto const address : addresses) {
                 auto const &instruction = *disassembly.at(address);
-                add_struc_field(struc, instruction);
                 dumper.dump_instruction(std::clog,
                                         pe_.raw_to_virtual_address(address),
                                         instruction);
+                auto contexts = flo.get_contexts(address);
+                auto cycles = flo.get_cycles(address);
+                add_struc_field(struc, contexts, instruction, cycles);
             }
             std::clog << '\n';
             print_struc(std::clog, struc);
@@ -197,6 +236,6 @@ void Restruc::analyze_flo(Flo &flo)
 #endif
 }
 
-void Restruc::debug(std::ostream &os)
+void Restruc::dump(std::ostream &os)
 {
 }

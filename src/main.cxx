@@ -34,22 +34,23 @@ int wmain(int argc, wchar_t *argv[])
 
         std::chrono::milliseconds time;
 
-        std::cout << "Reflo::analyze ...\n";
+        std::cout << "// Reflo::analyze ...\n";
         time = measure([&reflo] { reflo.analyze(); });
         auto analyzed = reflo.get_analyzed_va_bounds();
-        std::cout << std::setfill('0') << "Analyzed: [" << std::hex
+        std::cout << std::setfill('0') << "// Analyzed: [" << std::hex
                   << std::setw(8) << analyzed.first << "; " << std::hex
                   << std::setw(8) << analyzed.second << "], " << std::dec
                   << reflo.get_flos().size() << " functions in " << std::dec
                   << time.count() << "ms\n";
-        std::cout << "Recontex::analyze ...\n";
+        std::cout << "// Recontex::analyze ...\n";
         time = measure([&recontex] { recontex.analyze(); });
-        std::cout << "Analyzed " << std::dec << reflo.get_flos().size()
+        std::cout << "// Analyzed " << std::dec << reflo.get_flos().size()
                   << " functions in " << std::dec << time.count() << "ms\n";
-        std::cout << "Restruc::analyze ...\n";
+        std::cout << "// Restruc::analyze ...\n";
         time = measure([&restruc] { restruc.analyze(); });
-        std::cout << "Analyzed " << std::dec << reflo.get_flos().size()
+        std::cout << "// Analyzed " << std::dec << reflo.get_flos().size()
                   << " functions in " << std::dec << time.count() << "ms\n";
+        restruc.dump(std::cout);
     }
 #ifdef NDEBUG
     catch (std::exception const &e) {

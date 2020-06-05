@@ -48,6 +48,33 @@ namespace rstc {
     // Destination -> Call
     using Calls = std::multimap<Address, Call>;
 
+    struct Cycle {
+        struct ExitCondition {
+            ExitCondition(ZydisDecodedInstruction const *instruction,
+                          ZydisMnemonic const jump)
+                : instruction(instruction)
+                , jump(jump)
+            {
+            }
+            ZydisDecodedInstruction const * const instruction;
+            ZydisMnemonic const jump;
+        };
+        using ExitConditions = std::vector<ExitCondition>;
+        // First and last instructions. Last instruction is either JMP or Jcc.
+        Cycle(Address first, Address last, ExitConditions &&exit_conditions)
+            : first(first)
+            , last(last)
+            , exit_conditions(std::move(exit_conditions))
+        {
+        }
+        Address const first;
+        Address const last;
+        ExitConditions const exit_conditions;
+    };
+
+    // Address of last instruction -> Cycle
+    using Cycles = std::map<Address, Cycle>;
+
     using Disassembly = std::map<Address, Instruction>;
 
     class Flo {
@@ -92,19 +119,17 @@ namespace rstc {
         void filter_contexts(Address address, Contexts &contexts);
         ContextPropagationResult propagate_contexts(Address address,
                                                     Contexts contexts);
-
-        ZydisDecodedInstruction const *get_instruction(Address address) const;
+        void add_cycle(Contexts const &contexts, Address first, Address last);
 
         bool is_inside(Address address) const;
 
         static Address
         get_jump_destination(Address address,
                              ZydisDecodedInstruction const &instruction);
-        static std::unordered_set<Address>
-        get_jump_destinations(PE const &pe,
-                              Address address,
+        std::unordered_set<Address>
+        get_jump_destinations(Address address,
                               ZydisDecodedInstruction const &instruction,
-                              Contexts const &context);
+                              Contexts const &contexts);
         static Address
         get_call_destination(Address address,
                              ZydisDecodedInstruction const &instruction);
@@ -129,6 +154,9 @@ namespace rstc {
         inline Jumps const &get_outer_jumps() const { return outer_jumps_; }
         inline Jumps const &get_unknown_jumps() const { return unknown_jumps_; }
         inline Calls const &get_calls() const { return calls_; }
+
+        std::vector<Cycle const *> get_cycles(Address address) const;
+        inline Cycles const &get_cycles() const { return cycles_; }
 
         Address const entry_point;
         std::optional<Address> const end;
@@ -194,6 +222,9 @@ namespace rstc {
                                    Context const &context,
                                    Address source);
 
+        static bool
+        modifies_flags_register(ZydisDecodedInstruction const &instruction);
+
         bool stack_depth_is_ambiguous() const;
 
         void add_jump(Jump::Type type, Address dst, Address src);
@@ -206,6 +237,7 @@ namespace rstc {
         Jumps outer_jumps_;
         Jumps unknown_jumps_;
         Calls calls_;
+        Cycles cycles_;
         int stack_depth_ = 0;
         bool stack_depth_was_modified_ = false;
 
