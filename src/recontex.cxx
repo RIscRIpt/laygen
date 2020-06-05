@@ -115,31 +115,29 @@ void Recontex::wait_for_analysis()
 }
 
 void Recontex::propagate_contexts(Flo &flo,
-                                 Contexts contexts,
-                                 Address address,
-                                 Address end,
-                                 std::unordered_map<Address, size_t> visited)
+                                  Contexts contexts,
+                                  Address address,
+                                  Address end,
+                                  std::unordered_map<Address, size_t> visited)
 {
-    bool new_basic_block = true;
     if (!end) {
         auto last_instr = flo.get_disassembly().rbegin();
         end = last_instr->first + last_instr->second->length;
     }
+    else {
+        // 2nd (or more) visit
+        flo.filter_contexts(address, contexts);
+        if (contexts.empty()) {
+            return;
+        }
+    }
     // Visit visited instructions without going deeper.
     while (address && address < end && !contexts.empty()
            && visited[address] < 2) {
-        bool reset_next_contexts = false;
         visited[address]++;
 #ifdef DEBUG_CONTEXT_PROPAGATION
         DWORD va = pe_.raw_to_virtual_address(address);
 #endif
-        if (new_basic_block) {
-            new_basic_block = false;
-            flo.filter_contexts(address, contexts);
-            if (contexts.empty()) {
-                break;
-            }
-        }
         auto propagation_result =
             flo.propagate_contexts(address, std::move(contexts));
         contexts = std::move(propagation_result.new_contexts);
@@ -201,10 +199,8 @@ void Recontex::propagate_contexts(Flo &flo,
             Contexts next_contexts;
             update_contexts_after_unknown_call(contexts, address);
         }
-        else if (auto unconditional_jump =
-                     instr->mnemonic == ZYDIS_MNEMONIC_JMP;
-                 unconditional_jump
-                 || Flo::is_conditional_jump(instr->mnemonic)) {
+        else if (Flo::is_any_jump(instr->mnemonic)) {
+            bool unconditional_jump = instr->mnemonic == ZYDIS_MNEMONIC_JMP;
             auto dsts =
                 flo.get_jump_destinations(pe_, address, *instr, contexts);
             for (auto dst : dsts) {
@@ -221,26 +217,16 @@ void Recontex::propagate_contexts(Flo &flo,
             if (unconditional_jump) {
                 break;
             }
-            else {
-                new_basic_block = true;
-            }
-            if (dsts.empty() && unconditional_jump) {
-                reset_next_contexts = true;
-            }
         }
         else if (instr->mnemonic == ZYDIS_MNEMONIC_RET) {
-            reset_next_contexts = true;
-        }
-        address += instr->length;
-        // Check if next instruction is inside,
-        // if so set contexts from previous inner jump with current destination,
-        // otherwise stop.
-        if (reset_next_contexts) {
-            if (!flo.is_inside(address)) {
+            // Check if next instruction is inside,
+            // if so set contexts from previous inner jump
+            // with current destination, otherwise stop.
+            if (!flo.is_inside(address + instr->length)) {
                 break;
             }
             auto jumps = utils::multimap_values(
-                flo.get_inner_jumps().equal_range(address));
+                flo.get_inner_jumps().equal_range(address + instr->length));
             assert(jumps.begin() != jumps.end());
 #ifdef NDEBUG
             if (jumps.begin() == jumps.end()) {
@@ -252,6 +238,7 @@ void Recontex::propagate_contexts(Flo &flo,
                 utils::multimap_values(flo.get_contexts().equal_range(src));
             contexts = make_child_contexts(jump_contexts);
         }
+        address += instr->length;
     }
 }
 
@@ -266,7 +253,7 @@ Contexts Recontex::make_flo_initial_contexts(Flo &flo)
 }
 
 void Recontex::update_contexts_after_unknown_call(Contexts &contexts,
-                                                 Address caller)
+                                                  Address caller)
 {
     Contexts new_contexts;
     std::transform(contexts.begin(),
@@ -350,10 +337,10 @@ void Recontex::debug(std::ostream &os)
 }
 
 void Recontex::dump_register_history(std::ostream &os,
-                                    Dumper const &dumper,
-                                    Context const &context,
-                                    ZydisRegister reg,
-                                    std::unordered_set<Address> &visited) const
+                                     Dumper const &dumper,
+                                     Context const &context,
+                                     ZydisRegister reg,
+                                     std::unordered_set<Address> &visited) const
 {
     {
         if (auto changed = context.get_register(reg); changed) {
@@ -383,10 +370,10 @@ void Recontex::dump_register_history(std::ostream &os,
 }
 
 void Recontex::dump_memory_history(std::ostream &os,
-                                  Dumper const &dumper,
-                                  Context const &context,
-                                  ZydisDecodedOperand const &op,
-                                  std::unordered_set<Address> &visited) const
+                                   Dumper const &dumper,
+                                   Context const &context,
+                                   ZydisDecodedOperand const &op,
+                                   std::unordered_set<Address> &visited) const
 {
     if (auto mem_addr = Flo::get_memory_address(op, context); mem_addr) {
         auto values = context.get_memory(*mem_addr, op.element_size / 8);
