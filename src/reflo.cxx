@@ -127,22 +127,35 @@ void Reflo::post_fill_flo(Flo &flo)
 
 void Reflo::wait_before_analysis_run()
 {
-    auto lock = std::unique_lock(flos_mutex_);
+    auto lock = std::unique_lock(flos_waiting_mutex_);
     flos_cv_.wait(lock, [this] {
         return analyzing_threads_count_ < max_analyzing_threads_;
     });
     ++analyzing_threads_count_;
 }
 
-void Reflo::run_flo_analysis(Address entry_point)
+void Reflo::run_flo_analysis(Address entry_point, Address reference)
 {
-    // Prevent recursive analysis
+    // Prevent recursive and duplicate analysis
     if (created_flos_.contains(entry_point)) {
+        {
+            // Wait for flo to be created
+            auto lock = std::unique_lock(flos_waiting_mutex_);
+            flos_cv_.wait(lock, [this, entry_point] {
+                std::lock_guard<std::mutex> flo_guard(flos_mutex_);
+                return flos_.find(entry_point) != flos_.end();
+            });
+        }
+        auto &flo = *flos_.at(entry_point);
+        {
+            std::lock_guard<std::mutex> add_reference_guard(flo.mutex());
+            flo.add_reference(reference);
+        }
         return;
     }
     created_flos_.emplace(entry_point);
     wait_before_analysis_run();
-    analyzing_threads_.emplace_back([this, entry_point]() mutable {
+    analyzing_threads_.emplace_back([this, entry_point, reference]() mutable {
         try {
             ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
                 --analyzing_threads_count_;
@@ -165,12 +178,16 @@ void Reflo::run_flo_analysis(Address entry_point)
                     end = real_end;
                 }
             }
-            auto flo = std::make_unique<Flo>(pe_, entry_point, end);
+            auto flo = std::make_unique<Flo>(pe_, entry_point, reference, end);
             fill_flo(*flo);
 
             {
                 std::lock_guard<std::mutex> adding_flo_guard(flos_mutex_);
                 flos_.emplace(entry_point, std::move(flo));
+            }
+            {
+                std::lock_guard<std::mutex> adding_flo_guard(
+                    unprocessed_flos_mutex_);
                 unprocessed_flos_.push_back(entry_point);
             }
         }
@@ -210,7 +227,7 @@ void Reflo::run_flo_post_analysis(Flo &flo)
 
 Address Reflo::pop_unprocessed_flo()
 {
-    std::lock_guard<std::mutex> popping_flo_guard(flos_mutex_);
+    std::lock_guard<std::mutex> popping_flo_guard(unprocessed_flos_mutex_);
     auto address = unprocessed_flos_.front();
     unprocessed_flos_.pop_front();
     return address;
@@ -218,13 +235,15 @@ Address Reflo::pop_unprocessed_flo()
 
 void Reflo::find_and_analyze_flos()
 {
-    run_flo_analysis(pe_.get_entry_point());
+    run_flo_analysis(pe_.get_entry_point(), nullptr);
     while (true) {
         if (unprocessed_flos_.empty()) {
             // Wait for all analyzing threads
-            auto lock = std::unique_lock(flos_mutex_);
-            flos_cv_.wait(lock,
-                          [this] { return analyzing_threads_count_ == 0; });
+            auto lock = std::unique_lock(flos_waiting_mutex_);
+            flos_cv_.wait(lock, [this] {
+                return analyzing_threads_count_ == 0
+                       || !unprocessed_flos_.empty();
+            });
         }
         if (analyzing_threads_count_ == 0 && unprocessed_flos_.empty()) {
             break;
@@ -232,21 +251,23 @@ void Reflo::find_and_analyze_flos()
 
         auto &flo = flos_[pop_unprocessed_flo()];
 
-        // Iterate over unique call destinations
+        // Iterate over ~~unique~~ all call destinations
+        // All, because we collect references
         for (auto it = flo->get_calls().begin(), end = flo->get_calls().end();
              it != end;
-             it = flo->get_calls().upper_bound(it->first)) {
+             ++it) {
             auto const &call = it->second;
-            run_flo_analysis(call.dst);
+            run_flo_analysis(call.dst, call.src);
         }
 
-        // Iterate over unique outer jumps
+        // Iterate over ~~unique~~ all outer jumps
+        // All, because we collect references
         for (auto it = flo->get_outer_jumps().begin(),
                   end = flo->get_outer_jumps().end();
              it != end;
-             it = flo->get_outer_jumps().upper_bound(it->first)) {
+             ++it) {
             auto const &jump = it->second;
-            run_flo_analysis(jump.dst);
+            run_flo_analysis(jump.dst, jump.src);
         }
     }
     wait_for_analysis();
@@ -324,7 +345,7 @@ void Reflo::set_max_analyzing_threads(size_t amount)
 void Reflo::debug(std::ostream &os, DWORD va)
 {
     Dumper dumper;
-    run_flo_analysis(pe_.virtual_to_raw_address(va));
+    run_flo_analysis(pe_.virtual_to_raw_address(va), nullptr);
     wait_for_analysis();
     while (unknown_jumps_exist()) {
         promote_jumps_to_outer();

@@ -10,6 +10,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <variant>
@@ -56,10 +57,10 @@ namespace rstc {
                 , jump(jump)
             {
             }
-            ZydisDecodedInstruction const * const instruction;
+            ZydisDecodedInstruction const *const instruction;
             ZydisMnemonic const jump;
         };
-        using ExitConditions = std::vector<ExitCondition>;
+        using ExitConditions = std::multimap<ZydisRegister, ExitCondition>;
         // First and last instructions. Last instruction is either JMP or Jcc.
         Cycle(Address first, Address last, ExitConditions &&exit_conditions)
             : first(first)
@@ -107,6 +108,7 @@ namespace rstc {
 
         Flo(PE const &pe,
             Address entry_point = nullptr,
+            Address reference = nullptr,
             std::optional<Address> end = std::nullopt);
 
         AnalysisResult analyze(Address address, Instruction instr);
@@ -120,6 +122,7 @@ namespace rstc {
         ContextPropagationResult propagate_contexts(Address address,
                                                     Contexts contexts);
         void add_cycle(Contexts const &contexts, Address first, Address last);
+        void add_reference(Address reference);
 
         bool is_inside(Address address) const;
 
@@ -140,10 +143,17 @@ namespace rstc {
         static bool is_any_jump(ZydisMnemonic mnemonic);
         static bool is_conditional_jump(ZydisMnemonic mnemonic);
 
+        ZydisDecodedInstruction const *get_instruction(Address address) const;
+
         std::vector<Context const *> get_contexts(Address address) const;
         inline std::multimap<Address, Context> const &get_contexts() const
         {
             return contexts_;
+        }
+
+        inline std::set<Address> const &get_references() const
+        {
+            return references_;
         }
 
         inline Disassembly const &get_disassembly() const
@@ -158,6 +168,8 @@ namespace rstc {
         std::vector<Cycle const *> get_cycles(Address address) const;
         inline Cycles const &get_cycles() const { return cycles_; }
 
+        inline std::mutex &mutex() { return modify_access_mutex_; }
+
         Address const entry_point;
         std::optional<Address> const end;
 
@@ -168,9 +180,9 @@ namespace rstc {
             ZydisRegister reg = ZYDIS_REGISTER_NONE;
         };
 
-        using EmulationCallback = std::function<virt::Value(
-            virt::Value const &dst,
-            virt::Value const &src)>;
+        using EmulationCallback =
+            std::function<virt::Value(virt::Value const &dst,
+                                      virt::Value const &src)>;
         using EmulationCallbackAction =
             std::function<uintptr_t(uintptr_t, uintptr_t)>;
 
@@ -192,10 +204,9 @@ namespace rstc {
                                  Context &context,
                                  Address address,
                                  EmulationCallback const &callback);
-        void
-        emulate_instruction_lea(ZydisDecodedInstruction const &instruction,
-                                 Context &context,
-                                 Address address);
+        void emulate_instruction_lea(ZydisDecodedInstruction const &instruction,
+                                     Context &context,
+                                     Address address);
         void
         emulate_instruction_push(ZydisDecodedInstruction const &instruction,
                                  Context &context,
@@ -230,9 +241,11 @@ namespace rstc {
         void add_jump(Jump::Type type, Address dst, Address src);
         void add_call(Address dst, Address src, Address ret);
 
+        std::mutex modify_access_mutex_;
         PE const &pe_;
         Disassembly disassembly_;
         std::multimap<Address, Context> contexts_;
+        std::set<Address> references_;
         Jumps inner_jumps_;
         Jumps outer_jumps_;
         Jumps unknown_jumps_;

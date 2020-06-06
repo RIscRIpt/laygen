@@ -22,11 +22,15 @@ std::unordered_map<ZydisMnemonic, Flo::EmulationCallbackAction>
           [](uintptr_t dst, uintptr_t src) { return dst * src; } },
     };
 
-Flo::Flo(PE const &pe, Address entry_point, std::optional<Address> end)
+Flo::Flo(PE const &pe,
+         Address entry_point,
+         Address reference,
+         std::optional<Address> end)
     : entry_point(entry_point)
     , end(end)
     , pe_(pe)
 {
+    add_reference(reference);
 }
 
 Flo::AnalysisResult Flo::analyze(Address address, Instruction instr)
@@ -126,6 +130,14 @@ bool Flo::is_conditional_jump(ZydisMnemonic mnemonic)
         // Not Jxx / LOOPxx
         return false;
     }
+}
+
+ZydisDecodedInstruction const *Flo::get_instruction(Address address) const
+{
+    if (auto it = disassembly_.find(address); it != disassembly_.end()) {
+        return it->second.get();
+    }
+    return nullptr;
 }
 
 std::vector<Context const *> Flo::get_contexts(Address address) const
@@ -620,42 +632,46 @@ void Flo::add_cycle(Contexts const &contexts, Address first, Address last)
     assert(is_inside(first));
     Cycle::ExitConditions exit_conditions;
     auto it = disassembly_.find(first);
+    auto add_exit_condition = [first, &exit_conditions](decltype(it) it) {
+        auto jt = it;
+        for (; jt->first >= first; --jt) {
+            if (modifies_flags_register(*jt->second)) {
+                exit_conditions.emplace(
+                    std::piecewise_construct,
+                    std::forward_as_tuple(jt->second->operands[0].reg.value),
+                    std::forward_as_tuple(jt->second.get(),
+                                          it->second->mnemonic));
+                break;
+            }
+        }
+    };
     while (it->first < last) {
         if (Flo::is_conditional_jump(it->second->mnemonic)) {
             for (auto dst :
                  get_jump_destinations(it->first, *it->second, contexts)) {
-                if (dst >= first && dst <= last) {
+                if (dst <= last) {
                     // Jump is not outside cycle
                     goto next;
                 }
             }
-            auto jt = it;
-            for (; jt->first >= first; --jt) {
-                if (modifies_flags_register(*jt->second)) {
-                    exit_conditions.emplace_back(jt->second.get(),
-                                                 it->second->mnemonic);
-                    break;
-                }
-            }
+            add_exit_condition(it);
         }
     next:
         ++it;
     }
     assert(it->first == last);
     if (Flo::is_conditional_jump(it->second->mnemonic)) {
-        auto jt = it;
-        for (; jt->first >= first; --jt) {
-            if (modifies_flags_register(*jt->second)) {
-                exit_conditions.emplace_back(jt->second.get(),
-                                             it->second->mnemonic);
-                break;
-            }
-        }
+        add_exit_condition(it);
     }
     cycles_.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(last),
         std::forward_as_tuple(first, last, std::move(exit_conditions)));
+}
+
+void Flo::add_reference(Address reference)
+{
+    references_.insert(reference);
 }
 
 void Flo::add_jump(Jump::Type type, Address dst, Address src)

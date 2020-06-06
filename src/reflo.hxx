@@ -44,7 +44,7 @@ namespace rstc {
         void fill_flo(Flo &flo);
         void post_fill_flo(Flo &flo);
         void wait_before_analysis_run();
-        void run_flo_analysis(Address entry_point);
+        void run_flo_analysis(Address entry_point, Address reference);
         void run_flo_post_analysis(Flo &flo);
         void find_and_analyze_flos();
         void promote_jumps_to_outer();
@@ -61,7 +61,9 @@ namespace rstc {
 
         size_t max_analyzing_threads_;
         std::atomic<size_t> analyzing_threads_count_ = 0;
-        std::mutex flos_mutex_; // TODO: check if usages of this mutex can be separated
+        std::mutex flos_mutex_;
+        std::mutex flos_waiting_mutex_;
+        std::mutex unprocessed_flos_mutex_;
         std::condition_variable flos_cv_;
         std::vector<std::thread> analyzing_threads_;
         std::unordered_set<Address> created_flos_;
