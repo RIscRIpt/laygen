@@ -20,6 +20,11 @@ Struc::Field::Field(Type type,
 {
 }
 
+bool Struc::Field::is_pointer_alias() const
+{
+    return size_ == 8 && (type_ == Int || type_ == UInt || type_ == Pointer);
+}
+
 Struc::Struc(std::string name)
     : name_(std::move(name))
 {
@@ -66,6 +71,22 @@ void Struc::add_struc_field(size_t offset, Struc const *struc, size_t count)
     }
 }
 
+void Struc::set_struc_ptr(size_t offset, Struc const *struc)
+{
+    size_t count = 1;
+    for (auto it = fields_.find(offset);
+         it != fields_.end() && it->first == offset;) {
+        count = std::max(count, it->second.count());
+        if (it->second.is_pointer_alias()) {
+            it = fields_.erase(it);
+        }
+        else {
+            ++it;
+        }
+    }
+    add_pointer_field(offset, count, struc);
+}
+
 size_t Struc::get_size() const
 {
     if (fields_.empty()) {
@@ -78,6 +99,11 @@ size_t Struc::get_size() const
         last_fields.end(),
         [](Field const &a, Field const &b) { return a.size() < b.size(); });
     return last_offset + largest_last_field->size();
+}
+
+bool Struc::has_field_at_offset(size_t offset)
+{
+    return fields_.contains(offset);
 }
 
 bool Struc::is_duplicate(size_t offset, Field const &field) const

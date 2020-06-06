@@ -33,6 +33,8 @@ namespace rstc {
             inline size_t count() const { return count_; }
             inline class Struc const *struc() const { return struc_; }
 
+            bool is_pointer_alias() const;
+
             inline bool operator==(Field const &rhs) const
             {
                 return type_ == rhs.type_ && size_ == rhs.size_ && count_
@@ -63,10 +65,12 @@ namespace rstc {
                                Struc const *struc = nullptr);
         void
         add_struc_field(size_t offset, Struc const *struc, size_t count = 1);
+        void set_struc_ptr(size_t offset, Struc const *struc);
 
         inline std::string const &name() const { return name_; }
 
         size_t get_size() const;
+        bool has_field_at_offset(size_t offset);
 
         inline std::multimap<size_t, Field> const &fields() const
         {
