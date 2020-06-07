@@ -229,13 +229,13 @@ void Reflo::run_flo_analysis(Address entry_point, Address reference)
             // Wait for flo to be created
             auto lock = std::unique_lock(flos_waiting_mutex_);
             flos_cv_.wait(lock, [this, entry_point] {
-                std::lock_guard<std::mutex> flo_guard(flos_mutex_);
+                std::scoped_lock<std::mutex> flo_guard(flos_mutex_);
                 return flos_.find(entry_point) != flos_.end();
             });
         }
         auto &flo = *flos_.at(entry_point);
         {
-            std::lock_guard<std::mutex> add_reference_guard(flo.mutex());
+            std::scoped_lock<std::mutex> add_reference_guard(flo.mutex());
             flo.add_reference(reference);
         }
         return;
@@ -279,14 +279,11 @@ void Reflo::run_flo_analysis(Address entry_point, Address reference)
 void Reflo::add_flo(std::unique_ptr<Flo> &&flo)
 {
     auto entry_point = flo->entry_point;
-    {
-        std::lock_guard<std::mutex> adding_flo_guard(flos_mutex_);
-        flos_.emplace(entry_point, std::move(flo));
-    }
-    {
-        std::lock_guard<std::mutex> adding_flo_guard(unprocessed_flos_mutex_);
-        unprocessed_flos_.push_back(entry_point);
-    }
+    std::scoped_lock<std::mutex, std::mutex> adding_flo_guard(
+        flos_mutex_,
+        unprocessed_flos_mutex_);
+    flos_.emplace(entry_point, std::move(flo));
+    unprocessed_flos_.push_back(entry_point);
 }
 
 void Reflo::run_flo_post_analysis(Flo &flo)
@@ -316,7 +313,7 @@ void Reflo::run_flo_post_analysis(Flo &flo)
 
 Address Reflo::pop_unprocessed_flo()
 {
-    std::lock_guard<std::mutex> popping_flo_guard(unprocessed_flos_mutex_);
+    std::scoped_lock<std::mutex> popping_flo_guard(unprocessed_flos_mutex_);
     auto address = unprocessed_flos_.front();
     unprocessed_flos_.pop_front();
     return address;
