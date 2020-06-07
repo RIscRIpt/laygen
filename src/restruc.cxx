@@ -203,7 +203,8 @@ void Restruc::link_flo_strucs(Flo &flo, FloStrucs &flo_strucs)
 void Restruc::add_flo_strucs(Flo &flo, FloStrucs &&flo_strucs)
 {
     std::scoped_lock<std::mutex> add_strucs_guard(modify_access_strucs_mutex_);
-    auto [it, inserted] = strucs_.emplace(flo.entry_point, std::move(flo_strucs));
+    auto [it, inserted] =
+        strucs_.emplace(flo.entry_point, std::move(flo_strucs));
     assert(inserted);
 }
 
@@ -223,9 +224,9 @@ std::string Restruc::generate_struc_name(Flo const &flo,
 }
 
 void Restruc::add_struc_field(Struc &struc,
-                            std::vector<Context const *> const &contexts,
-                            ZydisDecodedInstruction const &instruction,
-                            std::vector<Cycle const *> const &cycles)
+                              std::vector<Context const *> const &contexts,
+                              ZydisDecodedInstruction const &instruction,
+                              std::vector<Cycle const *> const &cycles)
 {
     auto mem_op = get_memory_operand(instruction);
     if (!mem_op) {
@@ -312,7 +313,8 @@ size_t Restruc::get_field_count(ZydisDecodedOperand const &mem_op,
                     break;
                 case ZYDIS_OPERAND_TYPE_MEMORY:
                     for (auto const &context : contexts) {
-                        if (auto address = Flo::get_memory_address(op2, context);
+                        if (auto address =
+                                Flo::get_memory_address(op2, context);
                             address) {
                             if (virt::Value value =
                                     context->get_memory(*address, 8);

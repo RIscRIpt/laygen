@@ -211,8 +211,7 @@ Registers::Registers(Registers const *parent)
     }
 }
 
-std::optional<Value>
-Registers::get(ZydisRegister zydis_reg) const
+std::optional<Value> Registers::get(ZydisRegister zydis_reg) const
 {
     if (auto it = reg_promotion_map_.find(zydis_reg);
         it != reg_promotion_map_.end()) {

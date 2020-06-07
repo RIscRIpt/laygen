@@ -233,8 +233,8 @@ void Recontex::propagate_contexts(Flo &flo,
                 ++it;
             }
             auto const &jump = std::prev(it)->second;
-            auto jump_contexts =
-                utils::multimap_values(flo.get_contexts().equal_range(jump.src));
+            auto jump_contexts = utils::multimap_values(
+                flo.get_contexts().equal_range(jump.src));
             contexts = make_child_contexts(jump_contexts);
             address = jump.dst;
             continue;

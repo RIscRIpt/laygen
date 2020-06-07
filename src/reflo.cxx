@@ -85,9 +85,9 @@ void Reflo::fill_flo(Flo &flo)
     while (address && address < end) {
         auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_ANALYSIS
-            Dumper dumper;
-            DWORD va = pe_.raw_to_virtual_address(address);
-            dumper.dump_instruction(std::clog, va, *instruction);
+        Dumper dumper;
+        DWORD va = pe_.raw_to_virtual_address(address);
+        dumper.dump_instruction(std::clog, va, *instruction);
 #endif
         auto analysis_result = flo.analyze(address, std::move(instruction));
         if (analysis_result.status == Flo::Stop) {
@@ -145,8 +145,8 @@ void Reflo::trim_flo(Flo &flo)
     }
 }
 
-bool
-Reflo::can_split_flo(Flo &flo, std::vector<Address> const &possible_splits) const
+bool Reflo::can_split_flo(Flo &flo,
+                          std::vector<Address> const &possible_splits) const
 {
     for (auto possible_split : possible_splits) {
         if (possible_split >= flo.end()) {
@@ -159,20 +159,19 @@ Reflo::can_split_flo(Flo &flo, std::vector<Address> const &possible_splits) cons
         std::clog << std::hex << va_ep << ": possible split = " << va_split
                   << '\n';
 #endif
-        for (auto const & jumps : { flo.get_inner_jumps(),
-                            flo.get_unknown_jumps(),
-                            flo.get_outer_jumps() }) {
+        for (auto const &jumps : { flo.get_inner_jumps(),
+                                   flo.get_unknown_jumps(),
+                                   flo.get_outer_jumps() }) {
             for (auto const &[_, jump] : jumps) {
 #ifdef DEBUG_FLO_SPLIT
-                    DWORD va_src = pe_.raw_to_virtual_address(jump.src);
-                    DWORD va_dst = pe_.raw_to_virtual_address(jump.dst);
-                    std::clog << "jump.src = " << std::hex << va_src
-                              << ", va_dst = " << std::hex << va_dst
-                              << ", va_split = " << std::hex << va_split
-                              << " : "
-                              << (jump.src < possible_split
-                                  && jump.dst >= possible_split)
-                              << '\n';
+                DWORD va_src = pe_.raw_to_virtual_address(jump.src);
+                DWORD va_dst = pe_.raw_to_virtual_address(jump.dst);
+                std::clog << "jump.src = " << std::hex << va_src
+                          << ", va_dst = " << std::hex << va_dst
+                          << ", va_split = " << std::hex << va_split << " : "
+                          << (jump.src < possible_split
+                              && jump.dst >= possible_split)
+                          << '\n';
 #endif
                 if (jump.src < possible_split && jump.dst >= possible_split) {
                     can_split = false;

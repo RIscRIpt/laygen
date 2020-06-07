@@ -52,7 +52,7 @@ namespace rstc::virt {
             return value();
         }
 
-        inline bool operator<(Value const& rhs) const
+        inline bool operator<(Value const &rhs) const
         {
             return raw_value() < rhs.raw_value();
         }

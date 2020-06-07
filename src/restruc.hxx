@@ -32,7 +32,8 @@ namespace rstc {
         void wait_for_analysis();
 
         void analyze_flo(Flo &flo);
-        FloStrucs create_flo_strucs(Flo &flo, MemoryInstructionGroups const &groups);
+        FloStrucs create_flo_strucs(Flo &flo,
+                                    MemoryInstructionGroups const &groups);
         void link_flo_strucs(Flo &flo, FloStrucs &flo_strucs);
         void add_flo_strucs(Flo &flo, FloStrucs &&flo_strucs);
 

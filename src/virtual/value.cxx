@@ -24,7 +24,10 @@ Value rstc::virt::make_value(Address source, uintptr_t value, int size)
     return Value(source, value, size);
 }
 
-Value rstc::virt::make_symbolic_value(Address source, int size, intptr_t offset, uintptr_t id)
+Value rstc::virt::make_symbolic_value(Address source,
+                                      int size,
+                                      intptr_t offset,
+                                      uintptr_t id)
 {
     return Value(source, Value::Symbol(id, offset), size);
 }

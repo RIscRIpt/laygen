@@ -63,13 +63,13 @@ namespace rstc {
                                  Context const &context,
                                  ZydisDecodedOperand const &op,
                                  std::unordered_set<Address> &visited) const;
-        void
-        dump_instruction_history(std::ostream &os,
-                                 Dumper const &dumper,
-                                 Address address,
-                                 ZydisDecodedInstruction const &instr,
-                                 std::vector<Context const *> const &contexts,
-                                 std::unordered_set<Address> visited = {}) const;
+        void dump_instruction_history(
+            std::ostream &os,
+            Dumper const &dumper,
+            Address address,
+            ZydisDecodedInstruction const &instr,
+            std::vector<Context const *> const &contexts,
+            std::unordered_set<Address> visited = {}) const;
 
         Reflo &reflo_;
         PE const &pe_;
