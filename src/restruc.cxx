@@ -166,7 +166,9 @@ void Restruc::link_flo_strucs(Flo &flo)
         auto const &instruction = *flo.get_instruction(address);
         if (instruction.mnemonic == ZYDIS_MNEMONIC_MOV) {
             auto const &src = instruction.operands[1];
-            assert(src.type == ZYDIS_OPERAND_TYPE_MEMORY);
+            if (src.type != ZYDIS_OPERAND_TYPE_MEMORY) {
+                continue;
+            }
             for (auto const &context :
                  utils::multimap_values(contexts.equal_range(address))) {
                 if (auto reg = context.get_register(src.mem.base); reg) {
@@ -345,7 +347,7 @@ void Restruc::dump(std::ostream &os)
         os << "// " << std::hex << std::setw(8)
            << pe_.raw_to_virtual_address(flo_ep) << ":\n";
         for (auto const &[_, struc] : flo_strucs) {
-            print_struc(os, *struc);
+            struc->print(os);
             os << '\n';
         }
     }
