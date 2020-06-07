@@ -84,9 +84,11 @@ namespace rstc {
             Stop = false,
             Next = true,
             Complete = Stop,
+            Unreachable = Stop,
             AlreadyAnalyzed = Stop,
             UnknownJump = Stop,
             OuterJump = Stop,
+            CycleJump = Stop,
             InnerJump = Next,
         };
 
@@ -117,6 +119,8 @@ namespace rstc {
         void
         promote_unknown_jumps(Jump::Type type,
                               std::function<bool(Address)> predicate = nullptr);
+
+        void set_end(Address end);
 
         void filter_contexts(Address address, Contexts &contexts);
         ContextPropagationResult propagate_contexts(Address address,
@@ -168,10 +172,10 @@ namespace rstc {
         std::vector<Cycle const *> get_cycles(Address address) const;
         inline Cycles const &get_cycles() const { return cycles_; }
 
+        inline std::optional<Address> const &end() const { return end_; }
         inline std::mutex &mutex() { return modify_access_mutex_; }
 
         Address const entry_point;
-        std::optional<Address> const end;
 
     private:
         struct Operand {
@@ -186,6 +190,7 @@ namespace rstc {
         using EmulationCallbackAction =
             std::function<uintptr_t(uintptr_t, uintptr_t)>;
 
+        bool should_be_unreachable(ZydisDecodedInstruction const &instruction);
         Jump::Type get_jump_type(Address dst,
                                  Address src,
                                  Address next,
@@ -241,6 +246,7 @@ namespace rstc {
         void add_jump(Jump::Type type, Address dst, Address src);
         void add_call(Address dst, Address src, Address ret);
 
+        std::optional<Address> end_;
         std::mutex modify_access_mutex_;
         PE const &pe_;
         Disassembly disassembly_;

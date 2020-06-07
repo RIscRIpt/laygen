@@ -27,7 +27,7 @@ Flo::Flo(PE const &pe,
          Address reference,
          std::optional<Address> end)
     : entry_point(entry_point)
-    , end(end)
+    , end_(end)
     , pe_(pe)
 {
     add_reference(reference);
@@ -35,6 +35,9 @@ Flo::Flo(PE const &pe,
 
 Flo::AnalysisResult Flo::analyze(Address address, Instruction instr)
 {
+    if (should_be_unreachable(*instr)) {
+        return { Unreachable, nullptr };
+    }
     auto [it, inserted] = disassembly_.emplace(address, std::move(instr));
     if (!inserted) {
         return { AlreadyAnalyzed, nullptr };
@@ -48,7 +51,7 @@ Flo::AnalysisResult Flo::analyze(Address address, Instruction instr)
         }
     }
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
-        if (!end && !is_inside(next_address)
+        if (!is_inside(next_address)
             && !promote_unknown_jumps(next_address, Jump::Inner)) {
             return { Complete, next_address };
         }
@@ -70,10 +73,11 @@ Flo::AnalysisResult Flo::analyze(Address address, Instruction instr)
                 break;
             case Jump::Inner:
                 if (!is_inside(next_address)) {
-                    if (!end) {
-                        next_address = dst;
+                    // Prevent analysis cycle
+                    if (dst <= address) {
+                        return { CycleJump, next_address };
                     }
-                    return { InnerJump, next_address };
+                    return { InnerJump, dst };
                 }
                 break;
             case Jump::Outer:
@@ -235,6 +239,12 @@ void Flo::promote_unknown_jumps(Jump::Type type,
             ++ijump;
         }
     }
+}
+
+void Flo::set_end(Address end)
+{
+    disassembly_.erase(disassembly_.lower_bound(end), disassembly_.end());
+    end_ = end;
 }
 
 void Flo::filter_contexts(Address address, Contexts &contexts)
@@ -714,6 +724,14 @@ void Flo::visit(Address address)
     promote_unknown_jumps(address, Jump::Inner);
 }
 
+bool Flo::should_be_unreachable(ZydisDecodedInstruction const &instruction)
+{
+    switch (instruction.mnemonic) {
+    case ZYDIS_MNEMONIC_INT3: return true;
+    }
+    return false;
+}
+
 Jump::Type Flo::get_jump_type(Address dst,
                               Address src,
                               Address next,
@@ -721,8 +739,8 @@ Jump::Type Flo::get_jump_type(Address dst,
 {
     // If we have end of flo,
     // we can easily check whether it is inner or outer jump
-    if (end) {
-        if (dst >= entry_point && dst < end) {
+    if (end_) {
+        if (dst >= entry_point && dst < end_) {
             return Jump::Inner;
         }
         return Jump::Outer;
@@ -775,9 +793,6 @@ bool Flo::stack_depth_is_ambiguous() const
 
 bool Flo::is_inside(Address address) const
 {
-    if (end) {
-        return address >= entry_point && address < end;
-    }
     return disassembly_.contains(address) || inner_jumps_.contains(address);
 }
 

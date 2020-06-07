@@ -43,8 +43,13 @@ namespace rstc {
 
         void fill_flo(Flo &flo);
         void post_fill_flo(Flo &flo);
+        void trim_flo(Flo &flo);
+        bool can_split_flo(Flo &flo,
+                           std::vector<Address> const &possible_splits) const;
+        std::vector<Address> get_possible_flo_ends(Address entry_point) const;
         void wait_before_analysis_run();
         void run_flo_analysis(Address entry_point, Address reference);
+        void add_flo(std::unique_ptr<Flo> &&flo);
         void run_flo_post_analysis(Flo &flo);
         void find_and_analyze_flos();
         void promote_jumps_to_outer();
@@ -52,6 +57,9 @@ namespace rstc {
         void post_analyze_flos();
         void wait_for_analysis();
         bool unknown_jumps_exist() const;
+
+        static bool is_tail_mnemonic(ZydisMnemonic mnemonic);
+        static bool is_inter_flo_filler(ZydisMnemonic mnemonic);
 
         Address pop_unprocessed_flo();
 

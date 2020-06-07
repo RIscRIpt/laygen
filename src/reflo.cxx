@@ -14,6 +14,7 @@
 
 //#define DEBUG_ANALYSIS
 //#define DEBUG_POST_ANALYSIS
+//#define DEBUG_FLO_SPLIT
 
 using namespace rstc;
 
@@ -75,8 +76,8 @@ void Reflo::fill_flo(Flo &flo)
 {
     Address address = flo.entry_point;
     Address end;
-    if (flo.end) {
-        end = *flo.end;
+    if (flo.end()) {
+        end = *flo.end();
     }
     else {
         end = pe_.get_end(address);
@@ -84,26 +85,30 @@ void Reflo::fill_flo(Flo &flo)
     while (address && address < end) {
         auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_ANALYSIS
-        Dumper dumper;
-        dumper.dump_instruction(std::clog,
-                                pe_.raw_to_virtual_address(address),
-                                *instruction);
+            Dumper dumper;
+            DWORD va = pe_.raw_to_virtual_address(address);
+            dumper.dump_instruction(std::clog, va, *instruction);
 #endif
         auto analysis_result = flo.analyze(address, std::move(instruction));
-        if (!(analysis_result.status & Flo::Next) && !flo.end) {
+        if (analysis_result.status == Flo::Stop) {
             break;
         }
         address = analysis_result.next_address;
     }
     post_fill_flo(flo);
+    // If we have end of the flo, trim unreachable instructions
+    // after RET/JMP, e.g. NOP, INT3, etc.
+    if (flo.end()) {
+        trim_flo(flo);
+    }
 }
 
 void Reflo::post_fill_flo(Flo &flo)
 {
     while (auto address = flo.get_unanalized_inner_jump_dst()) {
         Address end;
-        if (flo.end) {
-            end = *flo.end;
+        if (flo.end()) {
+            end = *flo.end();
         }
         else {
             end = pe_.get_end(address);
@@ -112,17 +117,99 @@ void Reflo::post_fill_flo(Flo &flo)
             auto instruction = decode_instruction(address, end);
 #ifdef DEBUG_POST_ANALYSIS
             Dumper dumper;
-            dumper.dump_instruction(std::clog,
-                                    pe_.raw_to_virtual_address(address),
-                                    *instruction);
+            DWORD va = pe_.raw_to_virtual_address(address);
+            dumper.dump_instruction(std::clog, va, *instruction);
 #endif
             auto analysis_result = flo.analyze(address, std::move(instruction));
-            if (!(analysis_result.status & Flo::Next) && !flo.end) {
+            if (analysis_result.status == Flo::Stop) {
                 break;
             }
             address = analysis_result.next_address;
         }
     }
+}
+
+void Reflo::trim_flo(Flo &flo)
+{
+    auto last = flo.get_disassembly().rbegin();
+    auto it = last;
+    while (is_inter_flo_filler(
+        it->second->mnemonic) /* && !is_tail_mnemonic(it->second->mnemonic)*/) {
+        ++it;
+    }
+    if (it != last) {
+        flo.set_end(std::prev(it)->first);
+    }
+    else {
+        flo.set_end(last->first + last->second->length);
+    }
+}
+
+bool
+Reflo::can_split_flo(Flo &flo, std::vector<Address> const &possible_splits) const
+{
+    for (auto possible_split : possible_splits) {
+        if (possible_split >= flo.end()) {
+            break;
+        }
+        bool can_split = true;
+#ifdef DEBUG_FLO_SPLIT
+        DWORD va_ep = pe_.raw_to_virtual_address(flo.entry_point);
+        DWORD va_split = pe_.raw_to_virtual_address(possible_split);
+        std::clog << std::hex << va_ep << ": possible split = " << va_split
+                  << '\n';
+#endif
+        for (auto const & jumps : { flo.get_inner_jumps(),
+                            flo.get_unknown_jumps(),
+                            flo.get_outer_jumps() }) {
+            for (auto const &[_, jump] : jumps) {
+#ifdef DEBUG_FLO_SPLIT
+                    DWORD va_src = pe_.raw_to_virtual_address(jump.src);
+                    DWORD va_dst = pe_.raw_to_virtual_address(jump.dst);
+                    std::clog << "jump.src = " << std::hex << va_src
+                              << ", va_dst = " << std::hex << va_dst
+                              << ", va_split = " << std::hex << va_split
+                              << " : "
+                              << (jump.src < possible_split
+                                  && jump.dst >= possible_split)
+                              << '\n';
+#endif
+                if (jump.src < possible_split && jump.dst >= possible_split) {
+                    can_split = false;
+                    break;
+                }
+            }
+            if (!can_split) {
+                break;
+            }
+        }
+#ifdef DEBUG_FLO_SPLIT
+        std::clog << std::hex << va_ep << ": can_split " << can_split << " @ "
+                  << va_split << '\n';
+#endif
+        if (can_split) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<Address> Reflo::get_possible_flo_ends(Address entry_point) const
+{
+    DWORD va = pe_.raw_to_virtual_address(entry_point);
+    std::vector<Address> possible_ends;
+    auto runtime_function = pe_.get_runtime_function(va);
+    while (runtime_function && runtime_function->BeginAddress == va
+           && runtime_function->EndAddress) {
+        if (auto raw_addr =
+                pe_.virtual_to_raw_address(runtime_function->EndAddress);
+            raw_addr) {
+            possible_ends.push_back(raw_addr);
+        }
+        va = runtime_function->EndAddress;
+        runtime_function = pe_.get_runtime_function(va);
+    }
+    return possible_ends;
 }
 
 void Reflo::wait_before_analysis_run()
@@ -158,6 +245,7 @@ void Reflo::run_flo_analysis(Address entry_point, Address reference)
     analyzing_threads_.emplace_back([this, entry_point, reference]() mutable {
         try {
             ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
+                auto lock = std::unique_lock(flos_waiting_mutex_);
                 --analyzing_threads_count_;
                 flos_cv_.notify_all();
             });
@@ -167,29 +255,17 @@ void Reflo::run_flo_analysis(Address entry_point, Address reference)
                       << std::setw(8) << pe_.raw_to_virtual_address(entry_point)
                       << '\n';
 #endif
-
+            auto possible_ends = get_possible_flo_ends(entry_point);
             std::optional<Address> end;
-            auto runtime_function = pe_.get_runtime_function(
-                pe_.raw_to_virtual_address(entry_point));
-            if (runtime_function && runtime_function->EndAddress) {
-                if (auto real_end = pe_.virtual_to_raw_address(
-                        runtime_function->EndAddress);
-                    real_end) {
-                    end = real_end;
-                }
+            if (!possible_ends.empty()) {
+                end = possible_ends.back();
             }
             auto flo = std::make_unique<Flo>(pe_, entry_point, reference, end);
             fill_flo(*flo);
-
-            {
-                std::lock_guard<std::mutex> adding_flo_guard(flos_mutex_);
-                flos_.emplace(entry_point, std::move(flo));
+            if (possible_ends.size() > 1) {
+                assert(!can_split_flo(*flo, possible_ends));
             }
-            {
-                std::lock_guard<std::mutex> adding_flo_guard(
-                    unprocessed_flos_mutex_);
-                unprocessed_flos_.push_back(entry_point);
-            }
+            add_flo(std::move(flo));
         }
         catch (zyan_error const &e) {
             std::cerr << std::hex << std::setfill('0')
@@ -198,6 +274,19 @@ void Reflo::run_flo_analysis(Address entry_point, Address reference)
                       << e.what() << '\n';
         }
     });
+}
+
+void Reflo::add_flo(std::unique_ptr<Flo> &&flo)
+{
+    auto entry_point = flo->entry_point;
+    {
+        std::lock_guard<std::mutex> adding_flo_guard(flos_mutex_);
+        flos_.emplace(entry_point, std::move(flo));
+    }
+    {
+        std::lock_guard<std::mutex> adding_flo_guard(unprocessed_flos_mutex_);
+        unprocessed_flos_.push_back(entry_point);
+    }
 }
 
 void Reflo::run_flo_post_analysis(Flo &flo)
@@ -335,6 +424,28 @@ bool Reflo::unknown_jumps_exist() const
     return std::any_of(flos_.cbegin(), flos_.cend(), [](auto const &flo) {
         return !flo.second->get_unknown_jumps().empty();
     });
+}
+
+bool Reflo::is_tail_mnemonic(ZydisMnemonic mnemonic)
+{
+    switch (mnemonic) {
+    case ZYDIS_MNEMONIC_RET:
+    case ZYDIS_MNEMONIC_JMP:
+        //
+        return true;
+    }
+    return false;
+}
+
+bool Reflo::is_inter_flo_filler(ZydisMnemonic mnemonic)
+{
+    switch (mnemonic) {
+    case ZYDIS_MNEMONIC_NOP:
+    case ZYDIS_MNEMONIC_INT3:
+        // TODO: find more inter flo fillers
+        return true;
+    }
+    return false;
 }
 
 void Reflo::set_max_analyzing_threads(size_t amount)

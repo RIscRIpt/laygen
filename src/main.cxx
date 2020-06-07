@@ -29,7 +29,7 @@ int wmain(int argc, wchar_t *argv[])
         rstc::Recontex recontex(reflo);
         rstc::Restruc restruc(reflo);
 
-        // TODO: remove when developed
+        // TODO: make Restruc thread safe
         restruc.set_max_analyzing_threads(1);
 
         std::chrono::milliseconds time;
