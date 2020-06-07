@@ -103,11 +103,6 @@ namespace rstc {
             Address const next_address;
         };
 
-        struct ContextPropagationResult {
-            Contexts new_contexts;
-            ZydisDecodedInstruction const *instruction = nullptr;
-        };
-
         Flo(PE const &pe,
             Address entry_point = nullptr,
             Address reference = nullptr,
@@ -122,9 +117,6 @@ namespace rstc {
 
         void set_end(Address end);
 
-        void filter_contexts(Address address, Contexts &contexts);
-        ContextPropagationResult propagate_contexts(Address address,
-                                                    Contexts contexts);
         void add_cycle(Contexts const &contexts, Address first, Address last);
         void add_reference(Address reference);
 
@@ -140,20 +132,11 @@ namespace rstc {
         static Address
         get_call_destination(Address address,
                              ZydisDecodedInstruction const &instruction);
-        static std::optional<uintptr_t>
-        get_memory_address(ZydisDecodedOperand const &op,
-                           Context const &context);
 
         static bool is_any_jump(ZydisMnemonic mnemonic);
         static bool is_conditional_jump(ZydisMnemonic mnemonic);
 
         ZydisDecodedInstruction const *get_instruction(Address address) const;
-
-        std::vector<Context const *> get_contexts(Address address) const;
-        inline std::multimap<Address, Context> const &get_contexts() const
-        {
-            return contexts_;
-        }
 
         inline std::set<Address> const &get_references() const
         {
@@ -178,18 +161,6 @@ namespace rstc {
         Address const entry_point;
 
     private:
-        struct Operand {
-            virt::Value value = virt::Value();
-            std::optional<uintptr_t> address = std::nullopt;
-            ZydisRegister reg = ZYDIS_REGISTER_NONE;
-        };
-
-        using EmulationCallback =
-            std::function<virt::Value(virt::Value const &dst,
-                                      virt::Value const &src)>;
-        using EmulationCallbackAction =
-            std::function<uintptr_t(uintptr_t, uintptr_t)>;
-
         bool should_be_unreachable(ZydisDecodedInstruction const &instruction);
         Jump::Type get_jump_type(Address dst,
                                  Address src,
@@ -200,43 +171,6 @@ namespace rstc {
             ZydisDecodedInstruction const &instruction);
         void visit(Address address);
         bool promote_unknown_jumps(Address dst, Jump::Type new_type);
-
-        Context const &emplace_context(Address address, Context &&context);
-        void emulate(Address address,
-                     ZydisDecodedInstruction const &instruction,
-                     Context &context);
-        void emulate_instruction(ZydisDecodedInstruction const &instruction,
-                                 Context &context,
-                                 Address address,
-                                 EmulationCallback const &callback);
-        void emulate_instruction_lea(ZydisDecodedInstruction const &instruction,
-                                     Context &context,
-                                     Address address);
-        void
-        emulate_instruction_push(ZydisDecodedInstruction const &instruction,
-                                 Context &context,
-                                 Address address);
-        void emulate_instruction_pop(ZydisDecodedInstruction const &instruction,
-                                     Context &context,
-                                     Address address);
-        void
-        emulate_instruction_call(ZydisDecodedInstruction const &instruction,
-                                 Context &context,
-                                 Address address);
-        void emulate_instruction_ret(ZydisDecodedInstruction const &instruction,
-                                     Context &context,
-                                     Address address);
-        void emulate_instruction_inc(ZydisDecodedInstruction const &instruction,
-                                     Context &context,
-                                     Address address,
-                                     int offset);
-        static virt::Value emulate_instruction_helper(
-            virt::Value const &dst,
-            virt::Value const &src,
-            std::function<uintptr_t(uintptr_t, uintptr_t)> action);
-        static Operand get_operand(ZydisDecodedOperand const &operand,
-                                   Context const &context,
-                                   Address source);
 
         static bool
         modifies_flags_register(ZydisDecodedInstruction const &instruction);
@@ -250,7 +184,6 @@ namespace rstc {
         std::mutex modify_access_mutex_;
         PE const &pe_;
         Disassembly disassembly_;
-        std::multimap<Address, Context> contexts_;
         std::set<Address> references_;
         Jumps inner_jumps_;
         Jumps outer_jumps_;
@@ -259,9 +192,6 @@ namespace rstc {
         Cycles cycles_;
         int stack_depth_ = 0;
         bool stack_depth_was_modified_ = false;
-
-        static std::unordered_map<ZydisMnemonic, EmulationCallbackAction>
-            emulation_callback_actions_;
     };
 
 }

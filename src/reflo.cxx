@@ -244,7 +244,7 @@ void Reflo::run_flo_analysis(Address entry_point, Address reference)
     analyzing_threads_.emplace_back([this, entry_point, reference]() mutable {
         try {
             ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
-                auto lock = std::unique_lock(flos_waiting_mutex_);
+                std::scoped_lock<std::mutex> notify_guard(flos_waiting_mutex_);
                 --analyzing_threads_count_;
                 flos_cv_.notify_all();
             });
@@ -291,6 +291,7 @@ void Reflo::run_flo_post_analysis(Flo &flo)
     analyzing_threads_.emplace_back([&] {
         try {
             ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
+                std::scoped_lock<std::mutex> notify_guard(flos_waiting_mutex_);
                 --analyzing_threads_count_;
                 flos_cv_.notify_all();
             });

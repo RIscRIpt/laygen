@@ -14,8 +14,9 @@ using namespace rstc;
 
 //#define DEBUG_ANALYSIS
 
-Restruc::Restruc(Reflo &reflo)
+Restruc::Restruc(Reflo const &reflo, Recontex const &recontex)
     : reflo_(reflo)
+    , recontex_(recontex)
     , pe_(reflo.get_pe())
     , max_analyzing_threads_(std::thread::hardware_concurrency())
 {
@@ -49,6 +50,7 @@ void Restruc::run_analysis(Flo &flo)
     ++analyzing_threads_count_;
     analyzing_threads_.emplace_back([this, &flo]() mutable {
         ScopeGuard decrement_analyzing_threads_count([this]() noexcept {
+            std::scoped_lock<std::mutex> notify_guard(analyzing_threads_mutex_);
             --analyzing_threads_count_;
             analyzing_threads_cv_.notify_all();
         });
@@ -73,7 +75,7 @@ void Restruc::wait_for_analysis()
 void Restruc::analyze_flo(Flo &flo)
 {
     auto const &disassembly = flo.get_disassembly();
-    auto const &contexts = flo.get_contexts();
+    auto const &flo_contexts = recontex_.get_contexts(flo);
     MemoryInstructionGroups groups;
     for (auto const &[address, instruction] : disassembly) {
         for (ZyanU8 i = 0; i < instruction->operand_count; i++) {
@@ -87,7 +89,7 @@ void Restruc::analyze_flo(Flo &flo)
                 continue;
             }
             for (auto const &context :
-                 utils::multimap_values(contexts.equal_range(address))) {
+                 utils::multimap_values(flo_contexts.equal_range(address))) {
                 if (auto reg = context.get_register(op.mem.base); reg) {
                     groups[*reg].push_back(address);
                 }
@@ -98,7 +100,7 @@ void Restruc::analyze_flo(Flo &flo)
         return;
     }
     FloStrucs flo_strucs = create_flo_strucs(flo, groups);
-    link_flo_strucs(flo, flo_strucs);
+    link_flo_strucs(flo, flo_contexts, flo_strucs);
     add_flo_strucs(flo, std::move(flo_strucs));
 }
 
@@ -137,7 +139,7 @@ Restruc::create_flo_strucs(Flo &flo, MemoryInstructionGroups const &groups)
                                         pe_.raw_to_virtual_address(address),
                                         instruction);
 #endif
-                auto contexts = flo.get_contexts(address);
+                auto contexts = recontex_.get_contexts(flo, address);
                 auto cycles = flo.get_cycles(address);
                 add_struc_field(*struc, contexts, instruction, cycles);
             }
@@ -155,7 +157,9 @@ Restruc::create_flo_strucs(Flo &flo, MemoryInstructionGroups const &groups)
     return flo_strucs;
 }
 
-void Restruc::link_flo_strucs(Flo &flo, FloStrucs &flo_strucs)
+void Restruc::link_flo_strucs(Flo &flo,
+                              Recontex::FloContexts const &flo_contexts,
+                              FloStrucs &flo_strucs)
 {
     if (flo_strucs.size() < 2) {
         return;
@@ -164,7 +168,6 @@ void Restruc::link_flo_strucs(Flo &flo, FloStrucs &flo_strucs)
     Dumper dumper;
     std::clog << "Linking strucs...\n";
 #endif
-    auto const &contexts = flo.get_contexts();
     for (auto &[address, struc] : flo_strucs) {
         if (!address) {
             continue;
@@ -176,7 +179,7 @@ void Restruc::link_flo_strucs(Flo &flo, FloStrucs &flo_strucs)
                 continue;
             }
             for (auto const &context :
-                 utils::multimap_values(contexts.equal_range(address))) {
+                 utils::multimap_values(flo_contexts.equal_range(address))) {
                 if (auto reg = context.get_register(src.mem.base); reg) {
                     if (auto it = flo_strucs.find(reg->source());
                         it != flo_strucs.end()) {
@@ -314,7 +317,7 @@ size_t Restruc::get_field_count(ZydisDecodedOperand const &mem_op,
                 case ZYDIS_OPERAND_TYPE_MEMORY:
                     for (auto const &context : contexts) {
                         if (auto address =
-                                Flo::get_memory_address(op2, context);
+                                Recontex::get_memory_address(op2, context);
                             address) {
                             if (virt::Value value =
                                     context->get_memory(*address, 8);

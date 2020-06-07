@@ -27,7 +27,7 @@ int wmain(int argc, wchar_t *argv[])
     {
         rstc::Reflo reflo(argv[1]);
         rstc::Recontex recontex(reflo);
-        rstc::Restruc restruc(reflo);
+        rstc::Restruc restruc(reflo, recontex);
 
         std::chrono::milliseconds time;
 

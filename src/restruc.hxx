@@ -1,5 +1,6 @@
 #pragma once
 
+#include "recontex.hxx"
 #include "reflo.hxx"
 #include "struc.hxx"
 
@@ -16,7 +17,7 @@ namespace rstc {
 
     class Restruc {
     public:
-        Restruc(Reflo &reflo);
+        Restruc(Reflo const &reflo, Recontex const &recontex);
 
         void analyze();
         void set_max_analyzing_threads(size_t amount);
@@ -34,10 +35,11 @@ namespace rstc {
         void analyze_flo(Flo &flo);
         FloStrucs create_flo_strucs(Flo &flo,
                                     MemoryInstructionGroups const &groups);
-        void link_flo_strucs(Flo &flo, FloStrucs &flo_strucs);
+        void link_flo_strucs(Flo &flo,
+                             Recontex::FloContexts const &flo_contexts,
+                             FloStrucs &flo_strucs);
         void add_flo_strucs(Flo &flo, FloStrucs &&flo_strucs);
 
-        Struc &make_struc(Flo &flo, FloStrucs &flo_strucs, virt::Value value);
         std::string generate_struc_name(Flo const &flo,
                                         virt::Value const &value);
         static ZydisDecodedOperand const *
@@ -52,7 +54,9 @@ namespace rstc {
                         std::vector<Context const *> const &contexts,
                         ZydisDecodedInstruction const &instruction,
                         std::vector<Cycle const *> const &cycles);
-        Reflo &reflo_;
+
+        Reflo const &reflo_;
+        Recontex const &recontex_;
         PE const &pe_;
 
         std::mutex modify_access_strucs_mutex_;

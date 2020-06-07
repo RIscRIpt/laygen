@@ -31,7 +31,7 @@ namespace rstc {
         std::pair<Address, Address> get_analyzed_bounds() const;
         std::pair<DWORD, DWORD> get_analyzed_va_bounds() const;
 
-        inline std::map<Address, std::unique_ptr<Flo>> &get_flos()
+        inline std::map<Address, std::unique_ptr<Flo>> const &get_flos() const
         {
             return flos_;
         }
