@@ -225,18 +225,19 @@ void Recontex::propagate_contexts(Flo &flo,
             if (!flo.is_inside(address + instr->length)) {
                 break;
             }
-            auto jumps = utils::multimap_values(
-                flo.get_inner_jumps().equal_range(address + instr->length));
-            assert(jumps.begin() != jumps.end());
-#ifdef NDEBUG
-            if (jumps.begin() == jumps.end()) {
-                break;
+            auto const &inner_jumps = flo.get_inner_jumps();
+            auto it = inner_jumps.lower_bound(address + instr->length);
+            assert(it != inner_jumps.end());
+            while (it != inner_jumps.end()
+                   && it->first == address + instr->length) {
+                ++it;
             }
-#endif
-            auto src = std::prev(jumps.end())->src;
+            auto const &jump = std::prev(it)->second;
             auto jump_contexts =
-                utils::multimap_values(flo.get_contexts().equal_range(src));
+                utils::multimap_values(flo.get_contexts().equal_range(jump.src));
             contexts = make_child_contexts(jump_contexts);
+            address = jump.dst;
+            continue;
         }
         address += instr->length;
     }
