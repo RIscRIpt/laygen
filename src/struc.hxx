@@ -41,6 +41,8 @@ namespace rstc {
                        && rhs.count_ && struc_ == rhs.struc_;
             }
 
+            std::string type_to_string() const;
+
         private:
             Field(Type type,
                   size_t size,
@@ -79,13 +81,13 @@ namespace rstc {
 
         static constexpr Struc const *const Atomic = nullptr;
 
+        void print(std::ostream &os) const;
+
     private:
         bool is_duplicate(size_t offset, Field const &field) const;
 
         std::string name_;
         std::multimap<size_t, Field> fields_;
     };
-
-    void print_struc(std::ostream &os, Struc const &struc);
 
 }

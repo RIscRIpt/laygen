@@ -25,6 +25,46 @@ bool Struc::Field::is_pointer_alias() const
     return size_ == 8 && (type_ == Int || type_ == UInt || type_ == Pointer);
 }
 
+std::string Struc::Field::type_to_string() const
+{
+    switch (type_) {
+    case Struc::Field::UInt:
+        switch (size_) {
+        case 1: return "uint8_t";
+        case 2: return "uint16_t";
+        case 4: return "uint32_t";
+        case 8: return "uint64_t";
+        }
+        break;
+    case Struc::Field::Int:
+        switch (size_) {
+        case 1: return "int8_t";
+        case 2: return "int16_t";
+        case 4: return "int32_t";
+        case 8: return "int64_t";
+        }
+        break;
+    case Struc::Field::Float:
+        switch (size_) {
+        case 2: return "f16_t";
+        case 4: return "float";
+        case 8: return "double";
+        case 10: return "long double";
+        }
+        break;
+    case Struc::Field::Pointer:
+        if (struc_) {
+            return struc_->name() + "*";
+        }
+        else {
+            return "void*";
+        }
+        break;
+    case Struc::Field::Struc: return struc_->name(); break;
+    }
+    return "";
+}
+
 Struc::Struc(std::string name)
     : name_(std::move(name))
 {
@@ -113,54 +153,13 @@ bool Struc::is_duplicate(size_t offset, Field const &field) const
     return it != other_fields.end();
 }
 
-static std::string field_type_to_string(Struc::Field const &field)
-{
-    switch (field.type()) {
-    case Struc::Field::UInt:
-        switch (field.size()) {
-        case 1: return "uint8_t";
-        case 2: return "uint16_t";
-        case 4: return "uint32_t";
-        case 8: return "uint64_t";
-        }
-        break;
-    case Struc::Field::Int:
-        switch (field.size()) {
-        case 1: return "int8_t";
-        case 2: return "int16_t";
-        case 4: return "int32_t";
-        case 8: return "int64_t";
-        }
-        break;
-    case Struc::Field::Float:
-        switch (field.size()) {
-        case 2: return "f16_t";
-        case 4: return "float";
-        case 8: return "double";
-        case 10: return "long double";
-        }
-        break;
-    case Struc::Field::Pointer:
-        if (field.struc()) {
-            return field.struc()->name() + "*";
-        }
-        else {
-            return "void*";
-        }
-        break;
-    case Struc::Field::Struc: return field.struc()->name().c_str(); break;
-    }
-    return "";
-}
-
-void rstc::print_struc(std::ostream &os, Struc const &struc)
+void Struc::print(std::ostream &os) const
 {
     auto os_flags = os.flags();
     os << std::setfill('0');
-    os << "struct " << struc.name() << " {\n";
-    auto fields = struc.fields();
+    os << "struct " << name_ << " {\n";
     size_t next_offset = 0;
-    for (auto it = fields.begin(); it != fields.end();) {
+    for (auto it = fields_.begin(); it != fields_.end();) {
         auto base_offset = it->first;
         if (base_offset > next_offset) {
             os << "    char _padding_" << std::hex << std::setw(4)
@@ -170,7 +169,7 @@ void rstc::print_struc(std::ostream &os, Struc const &struc)
         size_t union_field_count = 1;
         next_offset = base_offset + it->second.size() * it->second.count();
         auto it_end = std::next(it);
-        while (it_end != fields.end()) {
+        while (it_end != fields_.end()) {
             auto prev = std::prev(it_end);
             auto offset =
                 prev->first + prev->second.size() * prev->second.count();
@@ -193,7 +192,7 @@ void rstc::print_struc(std::ostream &os, Struc const &struc)
             auto offset = it->first;
             auto const &field = it->second;
             if (offset == base_offset) {
-                os << indent << field_type_to_string(field) << ' ' << "field_"
+                os << indent << field.type_to_string() << ' ' << "field_"
                    << std::hex << std::setw(4) << offset;
                 if (is_union) {
                     os << "_" << std::dec << j;
@@ -205,7 +204,7 @@ void rstc::print_struc(std::ostream &os, Struc const &struc)
             else {
                 os << indent << "struct { char _padding[0x" << std::hex
                    << std::setw(4) << offset - base_offset << "]; "
-                   << field_type_to_string(field) << " value";
+                   << field.type_to_string() << " value";
                 if (field.count() > 1) {
                     os << '[' << std::dec << field.count() << ']';
                 }
