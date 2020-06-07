@@ -29,9 +29,6 @@ int wmain(int argc, wchar_t *argv[])
         rstc::Recontex recontex(reflo);
         rstc::Restruc restruc(reflo);
 
-        // TODO: make Restruc thread safe
-        restruc.set_max_analyzing_threads(1);
-
         std::chrono::milliseconds time;
 
         std::cout << "// Reflo::analyze ...\n";
@@ -50,6 +47,7 @@ int wmain(int argc, wchar_t *argv[])
         time = measure([&restruc] { restruc.analyze(); });
         std::cout << "// Analyzed " << std::dec << reflo.get_flos().size()
                   << " functions in " << std::dec << time.count() << "ms\n";
+        std::cout << '\n';
         restruc.dump(std::cout);
     }
 #ifdef NDEBUG

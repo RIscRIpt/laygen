@@ -32,10 +32,11 @@ namespace rstc {
         void wait_for_analysis();
 
         void analyze_flo(Flo &flo);
-        void create_flo_strucs(Flo &flo, MemoryInstructionGroups const &groups);
-        void link_flo_strucs(Flo &flo);
+        FloStrucs create_flo_strucs(Flo &flo, MemoryInstructionGroups const &groups);
+        void link_flo_strucs(Flo &flo, FloStrucs &flo_strucs);
+        void add_flo_strucs(Flo &flo, FloStrucs &&flo_strucs);
 
-        Struc &make_struc(Flo &flo, virt::Value value);
+        Struc &make_struc(Flo &flo, FloStrucs &flo_strucs, virt::Value value);
         std::string generate_struc_name(Flo const &flo,
                                         virt::Value const &value);
         static ZydisDecodedOperand const *
@@ -53,6 +54,7 @@ namespace rstc {
         Reflo &reflo_;
         PE const &pe_;
 
+        std::mutex modify_access_strucs_mutex_;
         std::map<Address, FloStrucs> strucs_;
 
         size_t max_analyzing_threads_;

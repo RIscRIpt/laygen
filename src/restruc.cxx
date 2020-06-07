@@ -97,11 +97,15 @@ void Restruc::analyze_flo(Flo &flo)
     if (groups.empty()) {
         return;
     }
-    create_flo_strucs(flo, groups);
-    link_flo_strucs(flo);
+    FloStrucs flo_strucs = create_flo_strucs(flo, groups);
+    link_flo_strucs(flo, flo_strucs);
+    add_flo_strucs(flo, std::move(flo_strucs));
 }
-void Restruc::create_flo_strucs(Flo &flo, MemoryInstructionGroups const &groups)
+
+Restruc::FloStrucs
+Restruc::create_flo_strucs(Flo &flo, MemoryInstructionGroups const &groups)
 {
+    FloStrucs flo_strucs;
 #ifdef DEBUG_ANALYSIS
     Dumper dumper;
     // DWORD va = pe_.raw_to_virtual_address(flo.entry_point);
@@ -124,7 +128,8 @@ void Restruc::create_flo_strucs(Flo &flo, MemoryInstructionGroups const &groups)
                           << "]:\n";
             }
 #endif
-            auto &struc = make_struc(flo, value);
+            auto struc =
+                std::make_unique<Struc>(generate_struc_name(flo, value));
             for (auto const address : addresses) {
                 auto const &instruction = *flo.get_instruction(address);
 #ifdef DEBUG_ANALYSIS
@@ -134,23 +139,24 @@ void Restruc::create_flo_strucs(Flo &flo, MemoryInstructionGroups const &groups)
 #endif
                 auto contexts = flo.get_contexts(address);
                 auto cycles = flo.get_cycles(address);
-                add_struc_field(struc, contexts, instruction, cycles);
+                add_struc_field(*struc, contexts, instruction, cycles);
             }
 #ifdef DEBUG_ANALYSIS
             std::clog << '\n';
-            print_struc(std::clog, struc);
+            struc->print(std::clog);
             std::clog << '\n';
 #endif
+            flo_strucs.emplace(value.source(), std::move(struc));
         }
 #ifdef DEBUG_ANALYSIS
         std::clog << '\n';
 #endif
     }
+    return flo_strucs;
 }
 
-void Restruc::link_flo_strucs(Flo &flo)
+void Restruc::link_flo_strucs(Flo &flo, FloStrucs &flo_strucs)
 {
-    auto &flo_strucs = strucs_.at(flo.entry_point);
     if (flo_strucs.size() < 2) {
         return;
     }
@@ -194,12 +200,11 @@ void Restruc::link_flo_strucs(Flo &flo)
     }
 }
 
-Struc &Restruc::make_struc(Flo &flo, virt::Value value)
+void Restruc::add_flo_strucs(Flo &flo, FloStrucs &&flo_strucs)
 {
-    auto it = strucs_[flo.entry_point].emplace(
-        value.source(),
-        std::move(std::make_unique<Struc>(generate_struc_name(flo, value))));
-    return *it->second;
+    std::scoped_lock<std::mutex> add_strucs_guard(modify_access_strucs_mutex_);
+    auto [it, inserted] = strucs_.emplace(flo.entry_point, std::move(flo_strucs));
+    assert(inserted);
 }
 
 std::string Restruc::generate_struc_name(Flo const &flo,
