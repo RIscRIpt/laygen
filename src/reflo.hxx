@@ -25,8 +25,8 @@ namespace rstc {
 
         void debug(std::ostream &os, DWORD va);
 
-        Flo *get_entry_flo();
-        Flo *get_flo_by_address(Address address);
+        Flo *get_entry_flo() const;
+        Flo *get_flo_by_address(Address address) const;
 
         std::pair<Address, Address> get_analyzed_bounds() const;
         std::pair<DWORD, DWORD> get_analyzed_va_bounds() const;

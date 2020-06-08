@@ -25,20 +25,29 @@ namespace rstc {
         void dump(std::ostream &os);
 
     private:
-        using MemoryInstructionGroups =
-            std::map<virt::Value, std::vector<Address>>;
-        using FloStrucs = std::multimap<Address, std::unique_ptr<Struc>>;
+        struct InstructionsGroup {
+            std::unique_ptr<Struc> struc;
+            std::vector<Address> relevant_instructions;
+            ZydisRegister base_root_reg;
+        };
+        using MemoryInstructionsGroups =
+            std::map<virt::Value, InstructionsGroup>;
+        using FloInstructionsGroups = std::multimap<Address, InstructionsGroup>;
 
-        void run_analysis(Flo &flo);
+        void run_analysis(Flo &flo, void (Restruc::*callback)(Flo &));
         void wait_for_analysis();
 
         void analyze_flo(Flo &flo);
-        FloStrucs create_flo_strucs(Flo &flo,
-                                    MemoryInstructionGroups const &groups);
-        void link_flo_strucs(Flo &flo,
-                             Recontex::FloContexts const &flo_contexts,
-                             FloStrucs &flo_strucs);
-        void add_flo_strucs(Flo &flo, FloStrucs &&flo_strucs);
+        FloInstructionsGroups create_flo_strucs(Flo &flo,
+                                    MemoryInstructionsGroups &&groups);
+        void intra_link_flo_strucs(Flo &flo,
+                                   Recontex::FloContexts const &flo_contexts,
+                                   FloInstructionsGroups &flo_ig);
+        void add_flo_strucs(Flo &flo, FloInstructionsGroups &&flo_ig);
+
+        void inter_link_flo_strucs(Flo &flo);
+        void inter_link_flo_strucs_via_register(Flo &flo,
+                                                InstructionsGroup const &ig);
 
         std::string generate_struc_name(Flo const &flo,
                                         virt::Value const &value);
@@ -60,7 +69,7 @@ namespace rstc {
         PE const &pe_;
 
         std::mutex modify_access_strucs_mutex_;
-        std::map<Address, FloStrucs> strucs_;
+        std::map<Address, FloInstructionsGroups> strucs_;
 
         size_t max_analyzing_threads_;
         std::atomic<size_t> analyzing_threads_count_ = 0;

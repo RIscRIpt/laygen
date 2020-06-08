@@ -27,12 +27,12 @@ Reflo::Reflo(std::filesystem::path const &pe_path)
                                 ZYDIS_ADDRESS_WIDTH_64));
 }
 
-Flo *Reflo::get_entry_flo()
+Flo *Reflo::get_entry_flo() const
 {
     return get_flo_by_address(pe_.get_entry_point());
 }
 
-Flo *Reflo::get_flo_by_address(Address address)
+Flo *Reflo::get_flo_by_address(Address address) const
 {
     if (flos_.empty()) {
         return nullptr;

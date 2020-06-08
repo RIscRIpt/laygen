@@ -723,11 +723,35 @@ virt::Value Recontex::get_memory_address(ZydisDecodedOperand const &op,
     return virt::make_value(nullptr, value);
 }
 
+bool Recontex::points_to_stack(ZydisRegister reg,
+                               Address address,
+                               FloContexts const &flo_contexts)
+{
+    if (reg == ZYDIS_REGISTER_RSP) {
+        return true;
+    }
+    for (auto const &context :
+         utils::multimap_values(flo_contexts.equal_range(address))) {
+        if (auto value = context.get_register(reg);
+            value && !value->is_symbolic()) {
+            if (points_to_stack(value->value())) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool Recontex::points_to_stack(uintptr_t value)
+{
+    return (value & magic_stack_value_mask_) == magic_stack_value_mask_;
+}
+
 Contexts Recontex::make_flo_initial_contexts(Flo &flo)
 {
     auto c = Context(nullptr);
     c.set_register(ZYDIS_REGISTER_RSP,
-                   virt::make_value(flo.entry_point, 0xFF10000000000000));
+                   virt::make_value(flo.entry_point, magic_stack_value_ << 32));
     Contexts contexts;
     contexts.emplace(std::move(c));
     return contexts;
