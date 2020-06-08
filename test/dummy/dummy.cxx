@@ -4,6 +4,10 @@ struct S {
     float c;
 };
 
+struct T {
+    S *s;
+};
+
 long long hash(long long v)
 {
     return v * 0x5851F42D4C957F2D + 0x14057B7EF767814F;
@@ -20,9 +24,15 @@ int test(S const &s)
     return result;
 }
 
+int foo(T const &t)
+{
+    return test(*t.s);
+}
+
 int main()
 {
     S s;
+    T t;
     char h[5];
     for (int i = 0; i < 4; i++) {
         s.a[i] = hash(i);
@@ -31,5 +41,6 @@ int main()
     h[4] = '\0';
     s.b = h;
     s.c = 0.01;
-    return test(s);
+    t.s = &s;
+    return foo(t);
 }

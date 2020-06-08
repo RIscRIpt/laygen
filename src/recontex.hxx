@@ -25,6 +25,12 @@ namespace rstc {
         get_memory_address(ZydisDecodedOperand const &op,
                            Context const &context);
 
+        static bool points_to_stack(ZydisRegister reg,
+                                    Address address,
+                                    FloContexts const &flo_contexts);
+        static bool points_to_stack(uintptr_t value);
+
+
         void debug(std::ostream &os);
 
     private:
@@ -156,6 +162,9 @@ namespace rstc {
         std::mutex analyzing_threads_mutex_;
         std::condition_variable analyzing_threads_cv_;
 
+        static uintptr_t const magic_stack_value_ = 0xFFF4B1D1;
+        static uintptr_t const magic_stack_value_mask_ =
+            (magic_stack_value_ & ~1) << 32;
         static ZydisRegister const nonvolatile_registers_[];
         static ZydisRegister const volatile_registers_[];
         static std::unordered_map<ZydisMnemonic, EmulationCallbackAction>

@@ -29,6 +29,8 @@ int wmain(int argc, wchar_t *argv[])
         rstc::Recontex recontex(reflo);
         rstc::Restruc restruc(reflo, recontex);
 
+        restruc.set_max_analyzing_threads(1);
+
         std::chrono::milliseconds time;
 
         std::cout << "// Reflo::analyze ...\n";
