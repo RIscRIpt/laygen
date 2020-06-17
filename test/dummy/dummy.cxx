@@ -5,6 +5,7 @@ struct S {
 };
 
 struct T {
+    int x[4];
     S *s;
 };
 
@@ -24,8 +25,11 @@ int test(S const &s)
     return result;
 }
 
-int foo(T const &t)
+int foo(T &t)
 {
+    for (int i = 0; i < 4; i++) {
+        t.x[i] ^= hash(t.s->a[i]) ^ hash(t.s->b[i]);
+    }
     return test(*t.s);
 }
 
