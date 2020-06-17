@@ -11,8 +11,9 @@ namespace rstc::utils {
             : pair(pair)
         {
         }
-        I begin() const { return pair.first; }
-        I end() const { return pair.second; }
+        inline I begin() const { return pair.first; }
+        inline I end() const { return pair.second; }
+        inline bool empty() const { return pair.first == pair.second; }
     };
 
     template<typename I>
