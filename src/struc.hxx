@@ -2,6 +2,7 @@
 
 #include <iosfwd>
 #include <map>
+#include <mutex>
 #include <string>
 
 namespace rstc {
@@ -83,11 +84,15 @@ namespace rstc {
 
         void print(std::ostream &os) const;
 
+        inline std::mutex &mutex() { return modify_access_mutex_; }
+
     private:
         bool is_duplicate(size_t offset, Field const &field) const;
 
         std::string name_;
         std::multimap<size_t, Field> fields_;
+
+        std::mutex modify_access_mutex_;
     };
 
 }

@@ -17,6 +17,21 @@ namespace rstc {
 
     class Restruc {
     public:
+        struct StrucWrapper {
+            std::unique_ptr<Struc> struc;
+            std::map<Address, ZydisDecodedInstruction const *>
+                relevant_instructions;
+            ZydisRegister base_reg;
+        };
+
+        using FloStrucs = std::multimap<Address, StrucWrapper>;
+        using BaseRegisterMap = std::multimap<ZydisRegister, Address>;
+
+        struct FloInfo {
+            FloStrucs strucs;
+            BaseRegisterMap base_reg_map;
+        };
+
         Restruc(Reflo const &reflo, Recontex const &recontex);
 
         void analyze();
@@ -25,29 +40,25 @@ namespace rstc {
         void dump(std::ostream &os);
 
     private:
-        struct InstructionsGroup {
-            std::unique_ptr<Struc> struc;
-            std::vector<Address> relevant_instructions;
-            ZydisRegister base_root_reg;
-        };
-        using MemoryInstructionsGroups =
-            std::map<virt::Value, InstructionsGroup>;
-        using FloInstructionsGroups = std::multimap<Address, InstructionsGroup>;
+        using VirtValueGroups = std::map<virt::Value, StrucWrapper>;
+
+        FloInfo *get_flo_info(Flo const &flo);
 
         void run_analysis(Flo &flo, void (Restruc::*callback)(Flo &));
         void wait_for_analysis();
 
         void analyze_flo(Flo &flo);
-        FloInstructionsGroups create_flo_strucs(Flo &flo,
-                                    MemoryInstructionsGroups &&groups);
+        void create_flo_strucs(Flo &flo,
+                               FloInfo &flo_info,
+                               VirtValueGroups &&groups);
         void intra_link_flo_strucs(Flo &flo,
                                    Recontex::FloContexts const &flo_contexts,
-                                   FloInstructionsGroups &flo_ig);
-        void add_flo_strucs(Flo &flo, FloInstructionsGroups &&flo_ig);
+                                   FloInfo &flo_ig);
+        void add_flo_info(Flo &flo, FloInfo &&flo_ig);
 
         void inter_link_flo_strucs(Flo &flo);
-        void inter_link_flo_strucs_via_register(Flo &flo,
-                                                InstructionsGroup const &ig);
+        void inter_link_flo_strucs_via_register(Flo const &flo,
+                                                StrucWrapper const &sw);
 
         std::string generate_struc_name(Flo const &flo,
                                         virt::Value const &value);
@@ -68,8 +79,8 @@ namespace rstc {
         Recontex const &recontex_;
         PE const &pe_;
 
-        std::mutex modify_access_strucs_mutex_;
-        std::map<Address, FloInstructionsGroups> strucs_;
+        std::mutex modify_access_infos_mutex_;
+        std::map<Address, FloInfo> infos_;
 
         size_t max_analyzing_threads_;
         std::atomic<size_t> analyzing_threads_count_ = 0;
