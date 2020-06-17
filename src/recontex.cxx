@@ -810,7 +810,7 @@ void Recontex::dump_register_history(std::ostream &os,
                        << "      \t";
                 }
                 else {
-                    os << std::hex << '[' << std::setw(16)
+                    os << std::hex << '[' << std::setw(8)
                        << changed->symbol().id() << '+' << std::setw(4)
                        << changed->symbol().offset() << "]\t";
                 }

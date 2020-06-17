@@ -221,7 +221,7 @@ std::string Restruc::generate_struc_name(Flo const &flo,
     }
     else {
         oss << std::setw(8) << pe_.raw_to_virtual_address(flo.entry_point)
-            << '_' << std::setw(16) << value.raw_value();
+            << '_' << value.raw_value();
     }
     return oss.str();
 }

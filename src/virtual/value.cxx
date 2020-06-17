@@ -3,11 +3,10 @@
 using namespace rstc;
 using namespace rstc::virt;
 
-std::mt19937_64 Value::Symbol::id_generator;
-std::uniform_int_distribution<uintptr_t> Value::Symbol::id_distribution;
+std::atomic<uintptr_t> Value::Symbol::next_id_ = 1;
 
 Value::Symbol::Symbol(uintptr_t id, intptr_t offset)
-    : id_(id ? id : id_distribution(id_generator))
+    : id_(next_id_++)
     , offset_(offset)
 {
 }

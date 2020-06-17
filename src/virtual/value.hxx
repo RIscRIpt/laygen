@@ -2,8 +2,8 @@
 
 #include "core.hxx"
 
+#include <atomic>
 #include <optional>
-#include <random>
 #include <variant>
 
 namespace rstc::virt {
@@ -20,8 +20,7 @@ namespace rstc::virt {
         private:
             uintptr_t id_;
             intptr_t offset_;
-            static std::mt19937_64 id_generator;
-            static std::uniform_int_distribution<uintptr_t> id_distribution;
+            static std::atomic<uintptr_t> next_id_;
         };
 
         using ValueContainer = std::variant<uintptr_t, Symbol>;
@@ -47,7 +46,7 @@ namespace rstc::virt {
         {
             if (is_symbolic()) {
                 auto const &s = symbol();
-                return s.id() + s.offset();
+                return (s.id() << 32) | (s.offset() & 0xFFFFFFFF);
             }
             return value();
         }
