@@ -7,7 +7,8 @@
 using namespace rstc;
 using namespace rstc::virt;
 
-Memory::Values::Values(size_t size, Address default_source)
+Memory::Values::Values(uintptr_t address, size_t size, Address default_source)
+    : address(address)
 {
     container.reserve(size);
     for (size_t i = 0; i < size; i++) {
@@ -17,32 +18,25 @@ Memory::Values::Values(size_t size, Address default_source)
 
 Memory::Values::operator Value() const
 {
+    assert(container.size() <= 8);
     if (container.size() > 8) {
         return Value();
     }
-    bool symbolic = false;
     uintptr_t value = 0;
-    uintptr_t id = 0;
+    auto source = container.front().source();
     for (auto const &byte : container) {
         assert(byte.size() == 1);
         if (!byte.is_symbolic()) {
             assert(!(byte.value() & ~0xFF));
             value <<= 8;
             value |= byte.value();
-            utils::hash_combine(id, byte.value());
         }
         else {
-            symbolic = true;
-            id ^= byte.symbol().id();
+            uintptr_t id = reinterpret_cast<uintptr_t>(source);
+            return make_symbolic_value(source, container.size(), 0, address);
         }
     }
-    if (symbolic) {
-        return make_symbolic_value(container.front().source(),
-                                   container.size(),
-                                   0,
-                                   id);
-    }
-    return make_value(container.front().source(), value);
+    return make_value(source, value);
 }
 
 Memory::Memory(std::nullptr_t)
@@ -170,7 +164,7 @@ void Memory::set_value(std::shared_ptr<Holder> tree,
 
 Memory::Values Memory::get(uintptr_t address, size_t size) const
 {
-    Values values(size, default_source_);
+    Values values(address, size, default_source_);
     auto tree = std::static_pointer_cast<Holder>(holder_);
     uintptr_t begin = 0;
     uintptr_t end = ~0;

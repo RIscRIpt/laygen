@@ -51,6 +51,14 @@ namespace rstc::virt {
             return value();
         }
 
+        inline uintptr_t raw_address_value() const
+        {
+            if (is_symbolic()) {
+                return symbol().id();
+            }
+            return value();
+        }
+
         inline bool operator<(Value const &rhs) const
         {
             return raw_value() < rhs.raw_value();

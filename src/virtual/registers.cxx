@@ -341,6 +341,18 @@ bool Registers::is_tracked(ZydisRegister zydis_reg) const
     return register_map.contains(zydis_reg);
 }
 
+std::optional<Registers::Reg> Registers::from_zydis(ZydisRegister zydis_reg)
+{
+    if (auto it = reg_promotion_map_.find(zydis_reg);
+        it != reg_promotion_map_.end()) {
+        zydis_reg = it->second;
+    }
+    if (auto it = register_map.find(zydis_reg); it != register_map.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
+
 void Registers::initialize_holder(Holder &holder, size_t begin, size_t end)
 {
     auto middle = begin + (end - begin) / 2;

@@ -316,14 +316,12 @@ size_t Restruc::get_field_count(ZydisDecodedOperand const &mem_op,
                     break;
                 case ZYDIS_OPERAND_TYPE_MEMORY:
                     for (auto const &context : contexts) {
-                        if (auto address =
-                                Recontex::get_memory_address(op2, context);
-                            address) {
-                            if (virt::Value value =
-                                    context->get_memory(*address, 8);
-                                !value.is_symbolic()) {
-                                count = std::max(count, value.value());
-                            }
+                        auto address =
+                            Recontex::get_memory_address(op2, context)
+                                .raw_address_value();
+                        if (virt::Value value = context->get_memory(address, 8);
+                            !value.is_symbolic()) {
+                            count = std::max(count, value.value());
                         }
                     }
                     break;

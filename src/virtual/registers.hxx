@@ -93,6 +93,8 @@ namespace rstc::virt {
 
         bool is_tracked(ZydisRegister zydis_reg) const;
 
+        static std::optional<Reg> from_zydis(ZydisRegister zydis_reg);
+
         static const std::unordered_map<ZydisRegister, Registers::Reg>
             register_map;
 
