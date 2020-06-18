@@ -6,7 +6,7 @@ using namespace rstc::virt;
 std::atomic<uintptr_t> Value::Symbol::next_id_ = 1;
 
 Value::Symbol::Symbol(uintptr_t id, intptr_t offset)
-    : id_(next_id_++)
+    : id_(id ? id : next_id_++)
     , offset_(offset)
 {
 }
