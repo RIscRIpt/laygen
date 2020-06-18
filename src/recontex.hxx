@@ -21,7 +21,7 @@ namespace rstc {
         std::vector<Context const *> get_contexts(Flo const &flo,
                                                   Address address) const;
 
-        static std::optional<uintptr_t>
+        static virt::Value
         get_memory_address(ZydisDecodedOperand const &op,
                            Context const &context);
 

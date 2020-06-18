@@ -13,9 +13,10 @@ namespace rstc::virt {
     class Memory {
     public:
         struct Values {
+            uintptr_t address;
             std::vector<Value> container;
 
-            Values(size_t size, Address default_source);
+            Values(uintptr_t address, size_t size, Address default_source);
 
             operator Value() const;
         };

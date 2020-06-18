@@ -3,6 +3,7 @@
 #include "dumper.hxx"
 #include "scope_guard.hxx"
 #include "utils/adapters.hxx"
+#include "utils/hash.hxx"
 
 #include <algorithm>
 #include <iostream>
@@ -419,12 +420,9 @@ void Recontex::emulate(Address address,
                     virt::make_symbolic_value(address, op.element_size / 8));
                 break;
             case ZYDIS_OPERAND_TYPE_MEMORY:
-                if (auto value = get_memory_address(op, context); value) {
-                    context.set_memory(
-                        *value,
-                        virt::make_symbolic_value(address,
-                                                  op.element_size / 8));
-                }
+                context.set_memory(
+                    get_memory_address(op, context).raw_address_value(),
+                    virt::make_symbolic_value(address, op.element_size / 8));
                 break;
             default: break;
             }
@@ -652,7 +650,7 @@ Recontex::Operand Recontex::get_operand(ZydisDecodedOperand const &operand,
         }
     } break;
     case ZYDIS_OPERAND_TYPE_MEMORY: {
-        op.address = get_memory_address(operand, context);
+        op.address = get_memory_address(operand, context).raw_address_value();
         if (op.address && operand.element_size) {
             op.value =
                 context.get_memory(*op.address, operand.element_size / 8);
@@ -669,35 +667,60 @@ Recontex::Operand Recontex::get_operand(ZydisDecodedOperand const &operand,
     return op;
 }
 
-std::optional<uintptr_t>
-Recontex::get_memory_address(ZydisDecodedOperand const &op,
-                             Context const &context)
+virt::Value Recontex::get_memory_address(ZydisDecodedOperand const &op,
+                                         Context const &context)
 {
     assert(op.type == ZYDIS_OPERAND_TYPE_MEMORY);
+    bool symbolic = false;
     uintptr_t value = 0;
+    uintptr_t symbol = 0;
     if (op.mem.base != ZYDIS_REGISTER_NONE
         && op.mem.base != ZYDIS_REGISTER_RIP) {
-        if (auto base = context.get_register(op.mem.base);
-            base && !base->is_symbolic()) {
+        auto base = context.get_register(op.mem.base);
+        if (base && !base->is_symbolic()) {
             value += base->value();
         }
         else {
-            return std::nullopt;
+            symbolic = true;
+        }
+        if (base && base->is_symbolic()) {
+            if (auto base_reg = virt::Registers::from_zydis(op.mem.base);
+                base_reg) {
+                utils::hash_combine(symbol, *base_reg);
+            }
+            utils::hash_combine(symbol, base->symbol().id());
+            utils::hash_combine(symbol, base->symbol().offset());
         }
     }
-    if (op.mem.disp.has_displacement) {
-        value += op.mem.disp.value;
-    }
     if (op.mem.index != ZYDIS_REGISTER_NONE) {
-        if (auto index = context.get_register(op.mem.index);
-            index && !index->is_symbolic()) {
+        auto index = context.get_register(op.mem.index);
+        if (index && !index->is_symbolic()) {
             value += index->value() * op.mem.scale;
         }
         else {
-            return std::nullopt;
+            symbolic = true;
         }
+        if (index && index->is_symbolic()) {
+            if (auto index_reg = virt::Registers::from_zydis(op.mem.index);
+                index_reg) {
+                utils::hash_combine(symbol, *index_reg);
+            }
+            utils::hash_combine(symbol, index->symbol().id());
+            utils::hash_combine(symbol, index->symbol().offset());
+        }
+        utils::hash_combine(symbol, op.mem.scale);
     }
-    return value;
+    if (op.mem.disp.has_displacement) {
+        value += op.mem.disp.value;
+        utils::hash_combine(symbol, op.mem.disp.value);
+    }
+    if (op.element_size == 0) {
+        utils::hash_combine(symbol, true);
+    }
+    if (symbolic) {
+        return virt::make_symbolic_value(nullptr, 8, 0, symbol);
+    }
+    return virt::make_value(nullptr, value);
 }
 
 Contexts Recontex::make_flo_initial_contexts(Flo &flo)
@@ -833,25 +856,25 @@ void Recontex::dump_memory_history(std::ostream &os,
                                    ZydisDecodedOperand const &op,
                                    std::unordered_set<Address> &visited) const
 {
-    if (auto mem_addr = Recontex::get_memory_address(op, context); mem_addr) {
-        auto values = context.get_memory(*mem_addr, op.element_size / 8);
-        std::unordered_set<Address> sources;
-        for (auto const &value : values.container) {
-            sources.emplace(value.source());
+    auto mem_addr =
+        Recontex::get_memory_address(op, context).raw_address_value();
+    auto values = context.get_memory(mem_addr, op.element_size / 8);
+    std::unordered_set<Address> sources;
+    for (auto const &value : values.container) {
+        sources.emplace(value.source());
+    }
+    for (auto source : sources) {
+        if (visited.contains(source)) {
+            continue;
         }
-        for (auto source : sources) {
-            if (visited.contains(source)) {
-                continue;
-            }
-            if (auto flo = reflo_.get_flo_by_address(source); flo) {
-                visited.emplace(source);
-                dump_instruction_history(os,
-                                         dumper,
-                                         source,
-                                         *flo->get_disassembly().at(source),
-                                         get_contexts(*flo, source),
-                                         visited);
-            }
+        if (auto flo = reflo_.get_flo_by_address(source); flo) {
+            visited.emplace(source);
+            dump_instruction_history(os,
+                                     dumper,
+                                     source,
+                                     *flo->get_disassembly().at(source),
+                                     get_contexts(*flo, source),
+                                     visited);
         }
     }
 }
