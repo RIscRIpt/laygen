@@ -29,7 +29,11 @@ int wmain(int argc, wchar_t *argv[])
         rstc::Recontex recontex(reflo);
         rstc::Restruc restruc(reflo, recontex);
 
+#ifndef NDEBUG
+        reflo.set_max_analyzing_threads(1);
+        recontex.set_max_analyzing_threads(1);
         restruc.set_max_analyzing_threads(1);
+#endif
 
         std::chrono::milliseconds time;
 

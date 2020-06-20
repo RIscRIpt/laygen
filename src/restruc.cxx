@@ -110,24 +110,35 @@ void Restruc::analyze_flo(Flo &flo)
     for (auto const &[address, instruction] : disassembly) {
         for (ZyanU8 i = 0; i < instruction->operand_count; i++) {
             auto const &op = instruction->operands[i];
-            if (op.visibility != ZYDIS_OPERAND_VISIBILITY_EXPLICIT
-                || op.type != ZYDIS_OPERAND_TYPE_MEMORY
-                || op.mem.base == ZYDIS_REGISTER_NONE
-                || op.mem.base == ZYDIS_REGISTER_RIP
-                // TODO: also analyze stack
-                || op.mem.base == ZYDIS_REGISTER_RSP) {
+            if (op.visibility != ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
                 continue;
             }
-            flo_info.base_reg_map.emplace(op.mem.base, address);
-            for (auto const &context :
-                 utils::multimap_values(flo_contexts.equal_range(address))) {
-                if (auto reg = context.get_register(op.mem.base); reg) {
-                    auto &group = groups[*reg];
-                    group.relevant_instructions.emplace(address,
-                                                        instruction.get());
-                    if (group.base_reg == ZYDIS_REGISTER_NONE) {
-                        // TODO: get real root
-                        group.base_reg = op.mem.base;
+            if (op.type == ZYDIS_OPERAND_TYPE_REGISTER
+                && op.actions & ZYDIS_OPERAND_ACTION_MASK_READ) {
+                for (auto const &context : utils::multimap_values(
+                         flo_contexts.equal_range(address))) {
+                    if (auto reg = context.get_register(op.reg.value); reg) {
+                        flo_info.root_map.emplace(*reg, op.reg.value);
+                    }
+                }
+            }
+            else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY
+                     && op.mem.base != ZYDIS_REGISTER_NONE
+                     && op.mem.base != ZYDIS_REGISTER_RIP
+                     // TODO: also analyze stack
+                     && op.mem.base != ZYDIS_REGISTER_RSP) {
+                flo_info.base_map.emplace(address, op.mem.base);
+                for (auto const &context : utils::multimap_values(
+                         flo_contexts.equal_range(address))) {
+                    if (auto reg = context.get_register(op.mem.base); reg) {
+                        auto &group = groups[*reg];
+                        group.relevant_instructions.emplace(address,
+                                                            instruction.get());
+                        if (group.base_reg == ZYDIS_REGISTER_NONE) {
+                            // Assume this is root base register, because
+                            // analysis starts from the beginning.
+                            group.base_reg = op.mem.base;
+                        }
                     }
                 }
             }
@@ -137,7 +148,9 @@ void Restruc::analyze_flo(Flo &flo)
         create_flo_strucs(flo, flo_info, std::move(groups));
         intra_link_flo_strucs(flo, flo_contexts, flo_info);
     }
-    add_flo_info(flo, std::move(flo_info));
+    if (!flo_info.empty()) {
+        add_flo_info(flo, std::move(flo_info));
+    }
 }
 
 void Restruc::create_flo_strucs(Flo &flo,
@@ -147,8 +160,6 @@ void Restruc::create_flo_strucs(Flo &flo,
 #ifdef DEBUG_ANALYSIS
     Dumper dumper;
     DWORD va = pe_.raw_to_virtual_address(flo.entry_point);
-#endif
-#ifdef DEBUG_ANALYSIS
     if (groups.empty()) {
         return;
     }
@@ -172,7 +183,7 @@ void Restruc::create_flo_strucs(Flo &flo,
 #ifdef DEBUG_ANALYSIS
             dumper.dump_instruction(std::clog,
                                     pe_.raw_to_virtual_address(address),
-                                    instruction);
+                                    *instruction);
 #endif
             auto contexts = recontex_.get_contexts(flo, address);
             auto cycles = flo.get_cycles(address);
@@ -180,7 +191,7 @@ void Restruc::create_flo_strucs(Flo &flo,
         }
 #ifdef DEBUG_ANALYSIS
         std::clog << '\n';
-        struc->print(std::clog);
+        sw.struc->print(std::clog);
         std::clog << '\n';
 #endif
         flo_info.strucs.emplace(value.source(), std::move(sw));
@@ -275,10 +286,10 @@ void Restruc::inter_link_flo_strucs(Flo &flo)
             for (auto const &context :
                  utils::multimap_values(flo_contexts.equal_range(address))) {
                 if (auto address = Recontex::get_memory_address(src, context);
-                    address) {
-                    assert(Recontex::points_to_stack(*address));
-                    // TODO: get argument number
-                    // inter_link_flo_strucs_via_stack(flo, sw);
+                    !address.is_symbolic()) {
+                    auto argument =
+                        Recontex::stack_argument_number(address.value());
+                    inter_link_flo_strucs_via_stack(flo, sw, argument);
                 }
             }
         }
@@ -288,10 +299,29 @@ void Restruc::inter_link_flo_strucs(Flo &flo)
     }
 }
 
+void Restruc::inter_link_flo_strucs_via_stack(Flo const &flo,
+                                              StrucWrapper const &sw,
+                                              unsigned argument)
+{
+    for (auto ref : flo.get_references()) {
+    }
+}
+
 void Restruc::inter_link_flo_strucs_via_register(Flo const &flo,
                                                  StrucWrapper const &sw)
 {
+#ifdef DEBUG_INTER_LINK
+    Dumper dumper;
+#endif
     for (auto ref : flo.get_references()) {
+#ifdef DEBUG_INTER_LINK
+        std::clog << "Inter linking strucs of flo @ " << std::setfill('0')
+                  << std::hex << std::setw(8)
+                  << pe_.raw_to_virtual_address(flo.entry_point)
+                  << " via reference @ " << std::setw(8)
+                  << pe_.raw_to_virtual_address(ref) << " * "
+                  << sw.struc->name() << '\n';
+#endif
         auto const ref_flo = reflo_.get_flo_by_address(ref);
 #ifndef NDEBUG
         if (!ref_flo) {
@@ -300,25 +330,42 @@ void Restruc::inter_link_flo_strucs_via_register(Flo const &flo,
 #else
         assert(ref_flo);
 #endif
+        Address ref_flo_sw_base = nullptr;
+        ZydisRegister base_reg = ZYDIS_REGISTER_NONE;
+        auto const &ref_flo_contexts = recontex_.get_contexts(*ref_flo);
         auto ref_flo_info = get_flo_info(*ref_flo);
-        if (!ref_flo_info) {
-            continue;
+        if (ref_flo_info) {
+            for (auto const &context :
+                 utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
+                if (auto val = context.get_register(sw.base_reg); val) {
+                    if (auto it = ref_flo_info->root_map.find(*val);
+                        it != ref_flo_info->root_map.end()) {
+                        if (ref_flo_sw_base == nullptr
+                            || ref_flo_sw_base > it->first.source()) {
+                            if (auto jt =
+                                    ref_flo_info->base_map.find(it->first.source());
+                                jt != ref_flo_info->base_map.end()) {
+                                base_reg = jt->second;
+                                ref_flo_sw_base = it->first.source();
+                            }
+                        }
+                    }
+                }
+            }
         }
-        auto ref_flo_base_reg_range = utils::multimap_values(
-            ref_flo_info->base_reg_map.equal_range(sw.base_reg));
-        auto it_base = std::upper_bound(ref_flo_base_reg_range.begin(),
-                                        ref_flo_base_reg_range.end(),
-                                        ref);
-        if (ref_flo_base_reg_range.empty()
-            || it_base == ref_flo_base_reg_range.begin()) {
+        if (!ref_flo_sw_base) {
             inter_link_flo_strucs_via_register(*ref_flo, sw);
             continue;
         }
-        auto ref_flo_sw_base = *std::prev(it_base);
-        auto const &ref_flo_contexts = recontex_.get_contexts(*ref_flo);
+#ifdef DEBUG_INTER_LINK
+        std::clog << "Reference Flo StructWrapper base:\n";
+        dumper.dump_instruction(std::clog,
+                                pe_.raw_to_virtual_address(ref_flo_sw_base),
+                                *ref_flo->get_instruction(ref_flo_sw_base));
+#endif
         for (auto const &context : utils::multimap_values(
                  ref_flo_contexts.equal_range(ref_flo_sw_base))) {
-            if (auto reg = context.get_register(sw.base_reg); reg) {
+            if (auto reg = context.get_register(base_reg); reg) {
                 auto range = ref_flo_info->strucs.equal_range(reg->source());
                 for (auto it = range.first; it != range.second; ++it) {
                     auto &parent_sw = it->second;
@@ -332,12 +379,12 @@ void Restruc::inter_link_flo_strucs_via_register(Flo const &flo,
                     if (offset < 0) {
                         continue;
                     }
+                    auto &parent_struc = *parent_sw.struc;
 #ifdef DEBUG_INTER_LINK
                     std::clog << "Linking " << sw.struc->name() << " with "
                               << parent_struc.name() << '\n';
 #endif
                     {
-                        auto &parent_struc = *parent_sw.struc;
                         std::scoped_lock<std::mutex> notify_guard(
                             parent_struc.mutex());
                         parent_struc.set_struc_ptr(offset, sw.struc.get());

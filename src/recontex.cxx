@@ -718,6 +718,9 @@ virt::Value Recontex::get_memory_address(ZydisDecodedOperand const &op,
         utils::hash_combine(symbol, true);
     }
     if (symbolic) {
+        if (op.mem.base == ZYDIS_REGISTER_RSP) {
+            symbol = magic_stack_value_mask_ | (symbol & 0xFFFFFFFFULL);
+        }
         return virt::make_symbolic_value(nullptr, 8, 0, symbol);
     }
     return virt::make_value(nullptr, value);
@@ -745,6 +748,14 @@ bool Recontex::points_to_stack(ZydisRegister reg,
 bool Recontex::points_to_stack(uintptr_t value)
 {
     return (value & magic_stack_value_mask_) == magic_stack_value_mask_;
+}
+
+unsigned rstc::Recontex::stack_argument_number(uintptr_t value)
+{
+    assert(points_to_stack(value));
+    auto offset = value & 0xFFFFFFFF;
+    assert(offset & -8); // divisible by 8
+    return offset / 8;
 }
 
 Contexts Recontex::make_flo_initial_contexts(Flo &flo)

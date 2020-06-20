@@ -25,7 +25,7 @@ int test(S const &s)
     return result;
 }
 
-int foo(T &t)
+int foo(int a, int b, int c, int d, T &t)
 {
     for (int i = 0; i < 4; i++) {
         t.x[i] ^= hash(t.s->a[i]) ^ hash(t.s->b[i]);
@@ -46,5 +46,5 @@ int main()
     s.b = h;
     s.c = 0.01;
     t.s = &s;
-    return foo(t);
+    return foo(s.a[0], s.a[1], s.a[2], s.a[3], t);
 }

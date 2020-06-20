@@ -25,11 +25,16 @@ namespace rstc {
         };
 
         using FloStrucs = std::multimap<Address, StrucWrapper>;
-        using BaseRegisterMap = std::multimap<ZydisRegister, Address>;
 
         struct FloInfo {
             FloStrucs strucs;
-            BaseRegisterMap base_reg_map;
+            std::map<Address, ZydisRegister> base_map;
+            std::map<virt::Value, ZydisRegister> root_map;
+
+            inline bool empty() const
+            {
+                return strucs.empty() && base_map.empty() && root_map.empty();
+            }
         };
 
         Restruc(Reflo const &reflo, Recontex const &recontex);
@@ -57,6 +62,9 @@ namespace rstc {
         void add_flo_info(Flo &flo, FloInfo &&flo_ig);
 
         void inter_link_flo_strucs(Flo &flo);
+        void inter_link_flo_strucs_via_stack(Flo const &flo,
+                                             StrucWrapper const &sw,
+                                             unsigned argument);
         void inter_link_flo_strucs_via_register(Flo const &flo,
                                                 StrucWrapper const &sw);
 
