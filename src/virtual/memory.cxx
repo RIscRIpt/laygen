@@ -22,7 +22,9 @@ Memory::Values::operator Value() const
     if (container.size() > 8) {
         return Value();
     }
+    bool symbolic = false;
     uintptr_t value = 0;
+    uintptr_t id = 0;
     auto source = container.front().source();
     for (auto const &byte : container) {
         assert(byte.size() == 1);
@@ -30,11 +32,18 @@ Memory::Values::operator Value() const
             assert(!(byte.value() & ~0xFF));
             value <<= 8;
             value |= byte.value();
+            utils::hash_combine(id, byte.value());
         }
         else {
-            uintptr_t id = reinterpret_cast<uintptr_t>(source);
-            return make_symbolic_value(source, container.size(), 0, address);
+            symbolic = true;
+            id ^= byte.symbol().id();
         }
+    }
+    if (symbolic) {
+        return make_symbolic_value(source,
+                                   container.size(),
+                                   0,
+                                   id);
     }
     return make_value(source, value);
 }
