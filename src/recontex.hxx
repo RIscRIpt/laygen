@@ -29,7 +29,7 @@ namespace rstc {
                                     Address address,
                                     FloContexts const &flo_contexts);
         static bool points_to_stack(uintptr_t value);
-
+        static unsigned stack_argument_number(uintptr_t value);
 
         void debug(std::ostream &os);
 
