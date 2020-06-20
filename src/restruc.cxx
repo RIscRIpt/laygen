@@ -14,7 +14,7 @@ using namespace rstc;
 
 //#define DEBUG_ANALYSIS
 //#define DEBUG_INTRA_LINK
-//#define DEBUG_INTER_LINK
+#define DEBUG_INTER_LINK
 
 Restruc::Restruc(Reflo const &reflo, Recontex const &recontex)
     : reflo_(reflo)
@@ -103,6 +103,13 @@ void Restruc::wait_for_analysis()
 
 void Restruc::analyze_flo(Flo &flo)
 {
+#ifdef DEBUG_ANALYSIS
+    Dumper dumper;
+    DWORD va = pe_.raw_to_virtual_address(flo.entry_point);
+    std::clog << std::setfill('0') << std::hex << std::setw(8)
+              << "Analyzing Flo @ "
+              << pe_.raw_to_virtual_address(flo.entry_point) << " ...\n";
+#endif
     FloInfo flo_info;
     VirtValueGroups groups;
     auto const &disassembly = flo.get_disassembly();
@@ -117,7 +124,15 @@ void Restruc::analyze_flo(Flo &flo)
                 && op.actions & ZYDIS_OPERAND_ACTION_MASK_READ) {
                 for (auto const &context : utils::multimap_values(
                          flo_contexts.equal_range(address))) {
+#ifdef DEBUG_ANALYSIS
+                    DWORD va = pe_.raw_to_virtual_address(address);
+#endif
                     if (auto reg = context.get_register(op.reg.value); reg) {
+#ifdef DEBUG_ANALYSIS
+                        std::clog << "Saving root register for #" << std::hex
+                                  << std::setw(8) << reg->raw_value() << '\t';
+                        dumper.dump_instruction(std::clog, va, *instruction);
+#endif
                         flo_info.root_map.emplace(*reg, op.reg.value);
                     }
                 }
@@ -303,7 +318,94 @@ void Restruc::inter_link_flo_strucs_via_stack(Flo const &flo,
                                               StrucWrapper const &sw,
                                               unsigned argument)
 {
+#ifdef DEBUG_INTER_LINK
+    Dumper dumper;
+#endif
     for (auto ref : flo.get_references()) {
+        auto const ref_flo = reflo_.get_flo_by_address(ref);
+#ifndef NDEBUG
+        if (!ref_flo) {
+            continue;
+        }
+#else
+        assert(ref_flo);
+#endif
+        auto const &ref_flo_contexts = recontex_.get_contexts(*ref_flo);
+        auto const &ref_instr = *ref_flo->get_instruction(ref);
+        // Tail JMP have already return address on stack
+        unsigned stack_offset = 8;
+        if (ref_instr.mnemonic == ZYDIS_MNEMONIC_CALL) {
+            // Where as CALL is yet to place return address on stack
+            stack_offset = 0;
+        }
+        Address ref_flo_sw_base = nullptr;
+        ZydisRegister base_reg = ZYDIS_REGISTER_NONE;
+        auto ref_flo_info = get_flo_info(*ref_flo);
+        if (ref_flo_info) {
+            for (auto const &context :
+                 utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
+                auto rsp = context.get_register(ZYDIS_REGISTER_RSP);
+                virt::Value arg = context.get_memory(
+                    rsp->raw_address_value() + stack_offset + argument * 8,
+                    8);
+                if (!ref_flo->is_inside(arg.source())) {
+                    inter_link_flo_strucs_via_stack(*ref_flo, sw, argument);
+                    continue;
+                }
+#ifdef DEBUG_INTER_LINK
+                std::clog << "Argument #" << argument << " source:\n";
+                dumper.dump_instruction(
+                    std::clog,
+                    pe_.raw_to_virtual_address(arg.source()),
+                    *ref_flo->get_instruction(arg.source()));
+#endif
+                if (auto it = ref_flo_info->root_map.find(arg);
+                    it != ref_flo_info->root_map.end()) {
+                    if (ref_flo_sw_base == nullptr
+                        || ref_flo_sw_base > it->first.source()) {
+                        if (auto jt =
+                                ref_flo_info->base_map.find(it->first.source());
+                            jt != ref_flo_info->base_map.end()) {
+                            base_reg = jt->second;
+                            ref_flo_sw_base = it->first.source();
+                        }
+                    }
+                }
+            }
+        }
+        if (!ref_flo_sw_base) {
+            inter_link_flo_strucs_via_stack(*ref_flo, sw, argument);
+            continue;
+        }
+        for (auto const &context : utils::multimap_values(
+                 ref_flo_contexts.equal_range(ref_flo_sw_base))) {
+            if (auto reg = context.get_register(base_reg); reg) {
+                auto range = ref_flo_info->strucs.equal_range(reg->source());
+                for (auto it = range.first; it != range.second; ++it) {
+                    auto &parent_sw = it->second;
+                    auto it_rel_instr =
+                        parent_sw.relevant_instructions.find(ref_flo_sw_base);
+                    if (it_rel_instr == parent_sw.relevant_instructions.end()) {
+                        continue;
+                    }
+                    auto const &relevant_instr = *it_rel_instr->second;
+                    intptr_t offset = relevant_instr.operands[1].mem.disp.value;
+                    if (offset < 0) {
+                        continue;
+                    }
+                    auto &parent_struc = *parent_sw.struc;
+#ifdef DEBUG_INTER_LINK
+                    std::clog << "Linking " << sw.struc->name() << " with "
+                              << parent_struc.name() << '\n';
+#endif
+                    {
+                        std::scoped_lock<std::mutex> notify_guard(
+                            parent_struc.mutex());
+                        parent_struc.set_struc_ptr(offset, sw.struc.get());
+                    }
+                }
+            }
+        }
     }
 }
 
