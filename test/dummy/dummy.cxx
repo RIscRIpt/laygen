@@ -14,12 +14,14 @@ long long hash(long long v)
     return v * 0x5851F42D4C957F2D + 0x14057B7EF767814F;
 }
 
-int test(S const &s)
+int test(int a, int b, int c, int d, S const &s)
 {
+    int x[4] = { a, b, c, d };
     int result = 0;
     for (int i = 0; i < 4; i++) {
         result ^= hash(s.a[i]);
         result ^= hash(s.b[i]);
+        result ^= x[i];
     }
     result %= static_cast<int>(1.0f / s.c);
     return result;
@@ -30,7 +32,7 @@ int foo(int a, int b, int c, int d, T &t)
     for (int i = 0; i < 4; i++) {
         t.x[i] ^= hash(t.s->a[i]) ^ hash(t.s->b[i]);
     }
-    return test(*t.s);
+    return test(a, b, c, d, *t.s);
 }
 
 int main()

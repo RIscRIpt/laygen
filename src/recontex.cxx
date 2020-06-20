@@ -755,7 +755,7 @@ unsigned rstc::Recontex::stack_argument_number(uintptr_t value)
     assert(points_to_stack(value));
     auto offset = value & 0xFFFFFFFF;
     assert(offset & -8); // divisible by 8
-    return offset / 8;
+    return offset / 8 - 1;
 }
 
 Contexts Recontex::make_flo_initial_contexts(Flo &flo)
