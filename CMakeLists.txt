@@ -26,8 +26,6 @@ set(DUMMY_NAME dummy)
 add_executable(${PROJECT_NAME} ${SOURCE_FILES})
 add_executable(${DUMMY_NAME} ${DUMMY_SOURCE_FILES})
 
-add_dependencies(${PROJECT_NAME} ${DUMMY_NAME})
-
 set_target_properties(
     ${PROJECT_NAME} PROPERTIES
     CXX_STANDARD 20
@@ -51,4 +49,20 @@ target_include_directories(
     ${SOURCE_DIR}
     ${zycore_INCLUDE_DIR}
     ${zydis_INCLUDE_DIR}
+)
+
+set_target_properties(
+    ${DUMMY_NAME} PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+)
+
+target_compile_options(
+    ${DUMMY_NAME} PRIVATE
+    "/GS-"
+)
+
+target_link_options(
+    ${DUMMY_NAME} PRIVATE
+    "/ENTRY:main" "/NODEFAULTLIB"
 )
