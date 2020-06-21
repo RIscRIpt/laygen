@@ -1,3 +1,7 @@
+extern "C" {
+int _fltused = 0;
+}
+
 struct S {
     int a[4];
     char const *b;
