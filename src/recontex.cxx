@@ -686,10 +686,10 @@ virt::Value Recontex::get_memory_address(ZydisDecodedOperand const &op,
         if (base && base->is_symbolic()) {
             if (auto base_reg = virt::Registers::from_zydis(op.mem.base);
                 base_reg) {
-                utils::hash_combine(symbol, *base_reg);
+                utils::hash::combine(symbol, *base_reg);
             }
-            utils::hash_combine(symbol, base->symbol().id());
-            utils::hash_combine(symbol, base->symbol().offset());
+            utils::hash::combine(symbol, base->symbol().id());
+            utils::hash::combine(symbol, base->symbol().offset());
         }
     }
     if (op.mem.index != ZYDIS_REGISTER_NONE) {
@@ -703,19 +703,19 @@ virt::Value Recontex::get_memory_address(ZydisDecodedOperand const &op,
         if (index && index->is_symbolic()) {
             if (auto index_reg = virt::Registers::from_zydis(op.mem.index);
                 index_reg) {
-                utils::hash_combine(symbol, *index_reg);
+                utils::hash::combine(symbol, *index_reg);
             }
-            utils::hash_combine(symbol, index->symbol().id());
-            utils::hash_combine(symbol, index->symbol().offset());
+            utils::hash::combine(symbol, index->symbol().id());
+            utils::hash::combine(symbol, index->symbol().offset());
         }
-        utils::hash_combine(symbol, op.mem.scale);
+        utils::hash::combine(symbol, op.mem.scale);
     }
     if (op.mem.disp.has_displacement) {
         value += op.mem.disp.value;
-        utils::hash_combine(symbol, op.mem.disp.value);
+        utils::hash::combine(symbol, op.mem.disp.value);
     }
     if (op.element_size == 0) {
-        utils::hash_combine(symbol, true);
+        utils::hash::combine(symbol, true);
     }
     if (symbolic) {
         if (op.mem.base == ZYDIS_REGISTER_RSP) {

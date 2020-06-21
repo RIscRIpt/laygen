@@ -10,13 +10,14 @@ using namespace rstc::virt;
 Memory::Values::Values(uintptr_t address, size_t size, Address default_source)
     : address(address)
 {
-    container.resize(size);
-    uintptr_t first_symbol_id = address;
-    for (size_t i = 1; i < container.size(); i++) {
-        container[i] = make_symbolic_value(default_source, 1);
-        first_symbol_id ^= container[i].symbol().id();
+    container.reserve(size);
+    uintptr_t id = address;
+    intptr_t offset = 0;
+    utils::hash::combine(id, offset);
+    for (size_t i = 0; i < size; i++) {
+        utils::hash::combine(id, address);
+        container.push_back(make_symbolic_value(default_source, 1, 0, id));
     }
-    container[0] = make_symbolic_value(default_source, 1, 0, first_symbol_id);
 }
 
 Memory::Values::operator Value() const
@@ -28,25 +29,29 @@ Memory::Values::operator Value() const
     bool symbolic = false;
     uintptr_t value = 0;
     uintptr_t id = 0;
+    intptr_t offset = 0;
+    if (auto const &last = container.back(); last.is_symbolic()) {
+        id = last.symbol().id();
+        offset = last.symbol().offset();
+    }
     auto source = container.front().source();
-    for (auto const &byte : container) {
+    for (auto it = container.rbegin(); it != container.rend(); ++it) {
+        auto const &byte = *it;
         assert(byte.size() == 1);
         if (!byte.is_symbolic()) {
             assert(!(byte.value() & ~0xFF));
             value <<= 8;
             value |= byte.value();
-            utils::hash_combine(id, byte.value());
+            utils::hash::reverse(id, byte.value());
         }
         else {
             symbolic = true;
-            id ^= byte.symbol().id();
+            utils::hash::reverse(id, address);
         }
     }
     if (symbolic) {
-        return make_symbolic_value(source,
-                                   container.size(),
-                                   0,
-                                   id);
+        utils::hash::reverse(id, offset);
+        return make_symbolic_value(source, container.size(), offset, id);
     }
     return make_value(source, value);
 }
@@ -65,23 +70,27 @@ Memory::Memory(Memory const *parent)
 
 void Memory::set(uintptr_t address, Value const &value)
 {
-    std::vector<Value> values(value.size());
+    std::vector<Value> values;
+    values.reserve(value.size());
     if (!value.is_symbolic()) {
         auto raw_value = value.value();
         std::transform(reinterpret_cast<Byte *>(&raw_value),
                        reinterpret_cast<Byte *>(&raw_value) + value.size(),
-                       values.begin(),
+                       std::back_inserter(values),
                        [source = value.source()](Byte b) {
                            return make_value(source, b, 1);
                        });
     }
     else {
-        uintptr_t first_symbol_id = value.symbol().id();
-        for (size_t i = 1; i < value.size(); i++) {
-            values[i] = make_symbolic_value(value.source(), 1);
-            first_symbol_id ^= values[i].symbol().id();
+        uintptr_t id = value.symbol().id();
+        utils::hash::combine(id, value.symbol().offset());
+        for (size_t i = 0; i < value.size(); i++) {
+            utils::hash::combine(id, address);
+            values.push_back(make_symbolic_value(value.source(),
+                                                 1,
+                                                 value.symbol().offset(),
+                                                 id));
         }
-        values[0] = make_symbolic_value(value.source(), 1, 0, first_symbol_id);
     }
     set(address, values);
 }

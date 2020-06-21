@@ -43,26 +43,28 @@ void Context::set_register(ZydisRegister reg, virt::Value value)
         return;
     }
     if (auto old = get_register(reg); old) {
-        utils::hash_combine(hash_, old->source());
+        utils::hash::reverse(hash_, old->source());
         if (old->is_symbolic()) {
-            utils::hash_combine(hash_, old->symbol().id());
+            utils::hash::reverse(hash_, old->symbol().offset());
+            utils::hash::reverse(hash_, old->symbol().id());
         }
         else {
-            utils::hash_combine(hash_, old->value());
+            utils::hash::reverse(hash_, old->value());
         }
         // Don't "un"-hash `reg`,
         // as we will hash it only if old value didn't exist
     }
     else {
-        utils::hash_combine(hash_, reg);
+        utils::hash::combine(hash_, reg);
     }
     if (value.is_symbolic()) {
-        utils::hash_combine(hash_, value.symbol().id());
+        utils::hash::combine(hash_, value.symbol().id());
+        utils::hash::combine(hash_, value.symbol().offset());
     }
     else {
-        utils::hash_combine(hash_, value.value());
+        utils::hash::combine(hash_, value.value());
     }
-    utils::hash_combine(hash_, value.source());
+    utils::hash::combine(hash_, value.source());
     registers_.set(reg, value);
 }
 
