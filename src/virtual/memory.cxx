@@ -10,10 +10,13 @@ using namespace rstc::virt;
 Memory::Values::Values(uintptr_t address, size_t size, Address default_source)
     : address(address)
 {
-    container.reserve(size);
-    for (size_t i = 0; i < size; i++) {
-        container.emplace_back(make_symbolic_value(default_source, 1));
+    container.resize(size);
+    uintptr_t first_symbol_id = address;
+    for (size_t i = 1; i < container.size(); i++) {
+        container[i] = make_symbolic_value(default_source, 1);
+        first_symbol_id ^= container[i].symbol().id();
     }
+    container[0] = make_symbolic_value(default_source, 1, 0, first_symbol_id);
 }
 
 Memory::Values::operator Value() const
