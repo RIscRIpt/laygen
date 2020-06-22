@@ -15,6 +15,7 @@ using namespace rstc;
 //#define DEBUG_ANALYSIS
 //#define DEBUG_INTRA_LINK
 #define DEBUG_INTER_LINK
+#define DEBUG_MERGE
 
 Restruc::Restruc(Reflo const &reflo, Recontex const &recontex)
     : reflo_(reflo)
@@ -470,9 +471,9 @@ void Restruc::inter_link_flo_strucs(Flo const &flo,
                 if (it_rel_instr == parent_sw.relevant_instructions.end()) {
                     continue;
                 }
-                auto const &relevant_instr = *it_rel_instr->second;
-                intptr_t offset = relevant_instr.operands[1].mem.disp.value;
-                if (offset < 0) {
+                auto mem_op = get_memory_operand(*it_rel_instr->second);
+                intptr_t offset = mem_op->mem.disp.value;
+                if (!mem_op || offset < 0) {
                     continue;
                 }
                 auto &parent_struc = *parent_sw.struc;
@@ -483,10 +484,26 @@ void Restruc::inter_link_flo_strucs(Flo const &flo,
                 {
                     std::scoped_lock<std::mutex> notify_guard(
                         parent_struc.mutex());
+                    for (auto const &field : utils::multimap_values(
+                             parent_struc.fields().equal_range(offset))) {
+                        if (field.type() == Struc::Field::Pointer && field.struc()) {
+                            merge_strucs(*sw.struc, *field.struc());
+                        }
+                    }
                     parent_struc.set_struc_ptr(offset, sw.struc.get());
                 }
             }
         }
+    }
+}
+
+void Restruc::merge_strucs(Struc &dst, Struc const &src)
+{
+#ifdef DEBUG_MERGE
+    std::clog << "Merging " << src.name() << " into " << dst.name() << '\n';
+#endif
+    for (auto const &[offset, field] : src.fields()) {
+        dst.merge_fields(offset, field);
     }
 }
 
@@ -561,6 +578,7 @@ Restruc::get_memory_operand(ZydisDecodedInstruction const &instruction)
     return nullptr;
 }
 
+// Returns count for Field by analyzing cycles (if any)
 size_t Restruc::get_field_count(ZydisDecodedOperand const &mem_op,
                                 std::vector<Cycle const *> const &cycles,
                                 std::vector<Context const *> const &contexts)

@@ -76,6 +76,8 @@ namespace rstc {
                                    Flo const &ref_flo,
                                    Address ref_sw_base);
 
+        void merge_strucs(Struc &dst, Struc const &src);
+
         std::string generate_struc_name(Flo const &flo,
                                         virt::Value const &value);
         static ZydisDecodedOperand const *

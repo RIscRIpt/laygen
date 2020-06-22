@@ -114,21 +114,33 @@ void Struc::add_struc_field(size_t offset, Struc const *struc, size_t count)
     add_field(offset, std::move(field));
 }
 
-void Struc::add_field(size_t offset, Field &&field)
+void Struc::add_field(size_t offset, Field field)
 {
     if (is_duplicate(offset, field)) {
         return;
     }
     utils::hash::mix(hash_, field.hash());
     utils::hash::mix(hash_, offset);
+    for (size_t i = 0; i < field.count(); i++) {
+        field_set_.insert(offset + i * field.size());
+    }
     fields_.emplace(offset, std::move(field));
 }
 
 bool Struc::is_duplicate(size_t offset, Field const &field) const
 {
-    auto other_fields = utils::multimap_values(fields_.equal_range(offset));
-    auto it = std::find(other_fields.begin(), other_fields.end(), field);
-    return it != other_fields.end();
+    auto end_field = fields_.upper_bound(offset);
+    for (auto it = fields_.begin(); it != end_field; ++it) {
+        auto const &other = it->second;
+        auto other_offset = it->first;
+        auto end_offset = offset + (other.count() - 1) * other.size();
+        if (other_offset == offset || end_offset > offset) {
+            if (field.type() == other.type()) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 void Struc::set_struc_ptr(size_t offset, Struc const *struc)
@@ -147,6 +159,22 @@ void Struc::set_struc_ptr(size_t offset, Struc const *struc)
     add_pointer_field(offset, count, struc);
 }
 
+void Struc::merge_fields(size_t offset, Field const &field)
+{
+    if (!has_field_at_offset(offset)) {
+        add_field(offset, field);
+        return;
+    }
+    if (is_duplicate(offset, field)) {
+        return;
+    }
+    if (field.type() == Field::Pointer && field.struc()) {
+        set_struc_ptr(offset, field.struc());
+        return;
+    }
+    add_field(offset, field);
+}
+
 size_t Struc::get_size() const
 {
     if (fields_.empty()) {
@@ -163,7 +191,7 @@ size_t Struc::get_size() const
 
 bool Struc::has_field_at_offset(size_t offset)
 {
-    return fields_.contains(offset);
+    return field_set_.contains(offset);
 }
 
 void Struc::print(std::ostream &os) const
