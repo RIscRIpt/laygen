@@ -26,6 +26,7 @@ namespace rstc {
                 Signed,
             };
 
+            inline size_t hash() const { return hash_; }
             inline Type type() const { return type_; }
             inline size_t size() const
             {
@@ -38,8 +39,9 @@ namespace rstc {
 
             inline bool operator==(Field const &rhs) const
             {
-                return type_ == rhs.type_ && size_ == rhs.size_ && count_
-                       && rhs.count_ && struc_ == rhs.struc_;
+                return hash_ == rhs.hash_ && type_ == rhs.type_
+                       && size_ == rhs.size_ && count_ && rhs.count_
+                       && struc_ == rhs.struc_;
             }
 
             std::string type_to_string() const;
@@ -54,6 +56,7 @@ namespace rstc {
             size_t size_;
             size_t count_;
             Type type_;
+            size_t hash_;
         };
 
         Struc(std::string name);
@@ -70,6 +73,7 @@ namespace rstc {
         add_struc_field(size_t offset, Struc const *struc, size_t count = 1);
         void set_struc_ptr(size_t offset, Struc const *struc);
 
+        inline size_t hash() const { return hash_; }
         inline std::string const &name() const { return name_; }
 
         size_t get_size() const;
@@ -87,7 +91,10 @@ namespace rstc {
         inline std::mutex &mutex() { return modify_access_mutex_; }
 
     private:
+        void add_field(size_t offset, Field &&field);
         bool is_duplicate(size_t offset, Field const &field) const;
+
+        size_t hash_;
 
         std::string name_;
         std::multimap<size_t, Field> fields_;
