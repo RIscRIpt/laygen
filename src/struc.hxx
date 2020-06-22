@@ -3,6 +3,7 @@
 #include <iosfwd>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 
 namespace rstc {
@@ -72,6 +73,7 @@ namespace rstc {
         void
         add_struc_field(size_t offset, Struc const *struc, size_t count = 1);
         void set_struc_ptr(size_t offset, Struc const *struc);
+        void merge_fields(size_t offset, Field const &field);
 
         inline size_t hash() const { return hash_; }
         inline std::string const &name() const { return name_; }
@@ -91,13 +93,14 @@ namespace rstc {
         inline std::mutex &mutex() { return modify_access_mutex_; }
 
     private:
-        void add_field(size_t offset, Field &&field);
+        void add_field(size_t offset, Field field);
         bool is_duplicate(size_t offset, Field const &field) const;
 
         size_t hash_;
 
         std::string name_;
         std::multimap<size_t, Field> fields_;
+        std::set<size_t> field_set_;
 
         std::mutex modify_access_mutex_;
     };
