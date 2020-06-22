@@ -1,6 +1,7 @@
 #include "struc.hxx"
 
 #include "utils/adapters.hxx"
+#include "utils/hash.hxx"
 
 #include <algorithm>
 #include <cassert>
@@ -17,7 +18,17 @@ Struc::Field::Field(Type type,
     , size_(size)
     , count_(count)
     , type_(type)
+    , hash_(0)
 {
+    utils::hash::mix(hash_, type_);
+    utils::hash::mix(hash_, size_);
+    utils::hash::mix(hash_, count_);
+    if (struc_) {
+        utils::hash::mix(hash_, struc_->hash());
+    }
+    else {
+        utils::hash::mix(hash_, nullptr);
+    }
 }
 
 bool Struc::Field::is_pointer_alias() const
@@ -81,34 +92,43 @@ void Struc::add_int_field(size_t offset,
                 size,
                 count,
                 Atomic);
-    if (!is_duplicate(offset, field)) {
-        fields_.emplace(offset, std::move(field));
-    }
+    add_field(offset, std::move(field));
 }
 
 void Struc::add_float_field(size_t offset, size_t size, size_t count)
 {
     assert(size == 2 || size == 4 || size == 8 || size == 10);
     Field field(Field::Float, size, count, Atomic);
-    if (!is_duplicate(offset, field)) {
-        fields_.emplace(offset, std::move(field));
-    }
+    add_field(offset, std::move(field));
 }
 
 void Struc::add_pointer_field(size_t offset, size_t count, Struc const *struc)
 {
     Field field(Field::Pointer, 8, count, struc);
-    if (!is_duplicate(offset, field)) {
-        fields_.emplace(offset, std::move(field));
-    }
+    add_field(offset, std::move(field));
 }
 
 void Struc::add_struc_field(size_t offset, Struc const *struc, size_t count)
 {
     Field field(Field::Struc, 0, count, struc);
-    if (!is_duplicate(offset, field)) {
-        fields_.emplace(offset, std::move(field));
+    add_field(offset, std::move(field));
+}
+
+void Struc::add_field(size_t offset, Field &&field)
+{
+    if (is_duplicate(offset, field)) {
+        return;
     }
+    utils::hash::mix(hash_, field.hash());
+    utils::hash::mix(hash_, offset);
+    fields_.emplace(offset, std::move(field));
+}
+
+bool Struc::is_duplicate(size_t offset, Field const &field) const
+{
+    auto other_fields = utils::multimap_values(fields_.equal_range(offset));
+    auto it = std::find(other_fields.begin(), other_fields.end(), field);
+    return it != other_fields.end();
 }
 
 void Struc::set_struc_ptr(size_t offset, Struc const *struc)
@@ -144,13 +164,6 @@ size_t Struc::get_size() const
 bool Struc::has_field_at_offset(size_t offset)
 {
     return fields_.contains(offset);
-}
-
-bool Struc::is_duplicate(size_t offset, Field const &field) const
-{
-    auto other_fields = utils::multimap_values(fields_.equal_range(offset));
-    auto it = std::find(other_fields.begin(), other_fields.end(), field);
-    return it != other_fields.end();
 }
 
 void Struc::print(std::ostream &os) const
