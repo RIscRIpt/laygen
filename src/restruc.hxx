@@ -67,11 +67,14 @@ namespace rstc {
                                              unsigned argument);
         void inter_link_flo_strucs_via_register(Flo const &flo,
                                                 StrucWrapper const &sw);
+        Address find_ref_sw_base(virt::Value const &value,
+                                 FloInfo const &ref_flo_info);
+        ZydisRegister find_ref_sw_base_reg(Address ref_sw_base,
+                                           FloInfo const &ref_flo_info);
         void inter_link_flo_strucs(Flo const &flo,
                                    StrucWrapper const &sw,
                                    Flo const &ref_flo,
-                                   Address ref_sw_base,
-                                   ZydisRegister ref_base_reg);
+                                   Address ref_sw_base);
 
         std::string generate_struc_name(Flo const &flo,
                                         virt::Value const &value);
