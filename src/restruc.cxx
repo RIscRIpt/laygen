@@ -339,7 +339,6 @@ void Restruc::inter_link_flo_strucs_via_stack(Flo const &flo,
             stack_offset = 0;
         }
         Address ref_sw_base = nullptr;
-        ZydisRegister base_reg = ZYDIS_REGISTER_NONE;
         auto ref_flo_info = get_flo_info(*ref_flo);
         if (ref_flo_info) {
             for (auto const &context :
@@ -359,17 +358,10 @@ void Restruc::inter_link_flo_strucs_via_stack(Flo const &flo,
                     pe_.raw_to_virtual_address(arg.source()),
                     *ref_flo->get_instruction(arg.source()));
 #endif
-                if (auto it = ref_flo_info->root_map.find(arg);
-                    it != ref_flo_info->root_map.end()) {
-                    if (ref_sw_base == nullptr
-                        || ref_sw_base > it->first.source()) {
-                        if (auto jt =
-                                ref_flo_info->base_map.find(it->first.source());
-                            jt != ref_flo_info->base_map.end()) {
-                            base_reg = jt->second;
-                            ref_sw_base = it->first.source();
-                        }
-                    }
+                if (auto new_ref_sw_base = find_ref_sw_base(arg, *ref_flo_info);
+                    ref_sw_base == nullptr
+                    || (new_ref_sw_base && new_ref_sw_base < ref_sw_base)) {
+                    ref_sw_base = new_ref_sw_base;
                 }
             }
         }
@@ -377,7 +369,7 @@ void Restruc::inter_link_flo_strucs_via_stack(Flo const &flo,
             inter_link_flo_strucs_via_stack(*ref_flo, sw, argument);
             continue;
         }
-        inter_link_flo_strucs(flo, sw, *ref_flo, ref_sw_base, base_reg);
+        inter_link_flo_strucs(flo, sw, *ref_flo, ref_sw_base);
     }
 }
 
@@ -405,24 +397,17 @@ void Restruc::inter_link_flo_strucs_via_register(Flo const &flo,
         assert(ref_flo);
 #endif
         Address ref_sw_base = nullptr;
-        ZydisRegister base_reg = ZYDIS_REGISTER_NONE;
         auto const &ref_flo_contexts = recontex_.get_contexts(*ref_flo);
         auto ref_flo_info = get_flo_info(*ref_flo);
         if (ref_flo_info) {
             for (auto const &context :
                  utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
                 if (auto val = context.get_register(sw.base_reg); val) {
-                    if (auto it = ref_flo_info->root_map.find(*val);
-                        it != ref_flo_info->root_map.end()) {
-                        if (ref_sw_base == nullptr
-                            || ref_sw_base > it->first.source()) {
-                            if (auto jt =
-                                    ref_flo_info->base_map.find(it->first.source());
-                                jt != ref_flo_info->base_map.end()) {
-                                base_reg = jt->second;
-                                ref_sw_base = it->first.source();
-                            }
-                        }
+                    if (auto new_ref_sw_base =
+                            find_ref_sw_base(*val, *ref_flo_info);
+                        ref_sw_base == nullptr
+                        || (new_ref_sw_base && new_ref_sw_base < ref_sw_base)) {
+                        ref_sw_base = new_ref_sw_base;
                     }
                 }
             }
@@ -431,15 +416,35 @@ void Restruc::inter_link_flo_strucs_via_register(Flo const &flo,
             inter_link_flo_strucs_via_register(*ref_flo, sw);
             continue;
         }
-        inter_link_flo_strucs(flo, sw, *ref_flo, ref_sw_base, base_reg);
+        inter_link_flo_strucs(flo, sw, *ref_flo, ref_sw_base);
     }
+}
+
+Address Restruc::find_ref_sw_base(virt::Value const &value,
+                                  FloInfo const &ref_flo_info)
+{
+    
+    if (auto it = ref_flo_info.root_map.find(value);
+        it != ref_flo_info.root_map.end()) {
+        return it->first.source();
+    }
+    return nullptr;
+}
+
+ZydisRegister Restruc::find_ref_sw_base_reg(Address ref_sw_base,
+                                            FloInfo const &ref_flo_info)
+{
+    if (auto it = ref_flo_info.base_map.find(ref_sw_base);
+        it != ref_flo_info.base_map.end()) {
+        return it->second;
+    }
+    return ZYDIS_REGISTER_NONE;
 }
 
 void Restruc::inter_link_flo_strucs(Flo const &flo,
                                     StrucWrapper const &sw,
                                     Flo const &ref_flo,
-                                    Address ref_sw_base,
-                                    ZydisRegister ref_base_reg)
+                                    Address ref_sw_base)
 {
 #ifdef DEBUG_INTER_LINK
     Dumper dumper;
@@ -448,12 +453,16 @@ void Restruc::inter_link_flo_strucs(Flo const &flo,
                             pe_.raw_to_virtual_address(ref_sw_base),
                             *ref_flo.get_instruction(ref_sw_base));
 #endif
+    auto const &ref_flo_info = *get_flo_info(ref_flo);
     auto const &ref_flo_contexts = recontex_.get_contexts(ref_flo);
-    auto ref_flo_info = get_flo_info(ref_flo);
+    auto ref_sw_base_reg = find_ref_sw_base_reg(ref_sw_base, ref_flo_info);
+    if (ref_sw_base_reg == ZYDIS_REGISTER_NONE) {
+        return;
+    }
     for (auto const &context :
          utils::multimap_values(ref_flo_contexts.equal_range(ref_sw_base))) {
-        if (auto reg = context.get_register(ref_base_reg); reg) {
-            auto range = ref_flo_info->strucs.equal_range(reg->source());
+        if (auto reg = context.get_register(ref_sw_base_reg); reg) {
+            auto range = ref_flo_info.strucs.equal_range(reg->source());
             for (auto it = range.first; it != range.second; ++it) {
                 auto &parent_sw = it->second;
                 auto it_rel_instr =
