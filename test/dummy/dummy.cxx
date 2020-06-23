@@ -6,6 +6,7 @@ struct S {
     int a[4];
     char const *b;
     float c;
+    float d;
 };
 
 struct T {
@@ -27,13 +28,13 @@ int test(int a, int b, int c, int d, S const &s)
         result ^= hash(s.b[i]);
         result ^= x[i];
     }
-    result %= static_cast<int>(1.0f / s.c);
+    result %= static_cast<int>(1.0f / (s.c * s.d));
     return result;
 }
 
 int foo(int a, int b, int c, int d, T &t)
 {
-    for (int i = 0; i < 4; i++) {
+    for (volatile int i = 0; i < 4; i++) {
         t.x[i] ^= hash(t.s->a[i]) ^ hash(t.s->b[i]);
     }
     return test(a, b, c, d, *t.s);
@@ -50,7 +51,8 @@ int main()
     }
     h[4] = '\0';
     s.b = h;
-    s.c = 0.01;
+    s.c = 0.1;
+    s.d = 0.1;
     t.s = &s;
     return foo(s.a[0], s.a[1], s.a[2], s.a[3], t);
 }
