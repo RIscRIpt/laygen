@@ -81,15 +81,15 @@ namespace rstc {
         static ZydisDecodedOperand const *
         get_memory_operand(ZydisDecodedInstruction const &instruction);
         static bool is_less_than_jump(ZydisMnemonic mnemonic);
-        static size_t
-        get_field_count(ZydisDecodedOperand const &mem_op,
-                        std::vector<Cycle const *> const &cycles,
-                        std::vector<Context const *> const &contexts);
-        static void
-        add_struc_field(Struc &struc,
-                        std::vector<Context const *> const &contexts,
-                        ZydisDecodedInstruction const &instruction,
-                        std::vector<Cycle const *> const &cycles);
+        size_t get_field_count(ZydisDecodedOperand const &mem_op,
+                               std::vector<Cycle const *> const &cycles,
+                               Address address,
+                               Recontex::FloContexts const &contexts);
+        void add_struc_field(Struc &struc,
+                             Address address,
+                             Recontex::FloContexts const &contexts,
+                             ZydisDecodedInstruction const &instruction,
+                             std::vector<Cycle const *> const &cycles);
 
         Reflo const &reflo_;
         Recontex const &recontex_;

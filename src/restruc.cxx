@@ -12,10 +12,10 @@
 
 using namespace rstc;
 
-//#define DEBUG_ANALYSIS
-//#define DEBUG_INTRA_LINK
-//#define DEBUG_INTER_LINK
-//#define DEBUG_MERGE
+#define DEBUG_ANALYSIS
+#define DEBUG_INTRA_LINK
+#define DEBUG_INTER_LINK
+#define DEBUG_MERGE
 
 Restruc::Restruc(Reflo const &reflo, Recontex const &recontex)
     : reflo_(reflo)
@@ -207,9 +207,12 @@ void Restruc::create_flo_strucs(Flo &flo,
                                     pe_.raw_to_virtual_address(address),
                                     *instruction);
 #endif
-            auto contexts = recontex_.get_contexts(flo, address);
             auto cycles = flo.get_cycles(address);
-            add_struc_field(*sd.struc, contexts, *instruction, cycles);
+            add_struc_field(*sd.struc,
+                            address,
+                            recontex_.get_contexts(flo),
+                            *instruction,
+                            cycles);
         }
 #ifdef DEBUG_ANALYSIS
         std::clog << '\n';
@@ -554,7 +557,8 @@ std::string Restruc::generate_struc_name(Flo const &flo,
 }
 
 void Restruc::add_struc_field(Struc &struc,
-                              std::vector<Context const *> const &contexts,
+                              Address address,
+                              Recontex::FloContexts const &contexts,
                               ZydisDecodedInstruction const &instruction,
                               std::vector<Cycle const *> const &cycles)
 {
@@ -569,7 +573,7 @@ void Restruc::add_struc_field(Struc &struc,
         }
         offset = mem_op->mem.disp.value;
     }
-    size_t count = get_field_count(*mem_op, cycles, contexts);
+    size_t count = get_field_count(*mem_op, cycles, address, contexts);
     if (!mem_op->element_size) {
         if (!struc.has_field_at_offset(offset)) {
             // struc.add_pointer_field(offset, count);
@@ -612,15 +616,39 @@ Restruc::get_memory_operand(ZydisDecodedInstruction const &instruction)
 // Returns count for Field by analyzing cycles (if any)
 size_t Restruc::get_field_count(ZydisDecodedOperand const &mem_op,
                                 std::vector<Cycle const *> const &cycles,
-                                std::vector<Context const *> const &contexts)
+                                Address address,
+                                Recontex::FloContexts const &contexts)
 {
     size_t count = 1;
     if (cycles.empty() || mem_op.mem.index == ZYDIS_REGISTER_NONE) {
         return count;
     }
     for (auto const &cycle : cycles) {
+        ZydisRegister exit_reg = ZYDIS_REGISTER_NONE;
+        for (auto const &context :
+             utils::multimap_values(contexts.equal_range(address))) {
+            auto index = context.get_register(mem_op.mem.index);
+            if (!index) {
+                continue;
+            }
+            for (auto const &exit_context :
+                 utils::multimap_values(contexts.equal_range(cycle->last))) {
+                for (auto const &[er, ec] : cycle->exit_conditions) {
+                    auto reg = exit_context.get_register(er);
+                    if (!reg) {
+                        continue;
+                    }
+                    if (index == *reg) {
+                        exit_reg = er;
+                        goto exit_reg_found;
+                    }
+                }
+            }
+        }
+        continue;
+    exit_reg_found:
         for (auto const &ec : utils::multimap_values(
-                 cycle->exit_conditions.equal_range(mem_op.mem.index))) {
+                 cycle->exit_conditions.equal_range(exit_reg))) {
             auto const &op2 = ec.instruction->operands[1];
             if (ec.instruction->mnemonic == ZYDIS_MNEMONIC_CMP
                 && is_less_than_jump(ec.jump)) {
@@ -633,8 +661,9 @@ size_t Restruc::get_field_count(ZydisDecodedOperand const &mem_op,
                     }
                     break;
                 case ZYDIS_OPERAND_TYPE_REGISTER:
-                    for (auto const &context : contexts) {
-                        if (auto value = context->get_register(op2.reg.value);
+                    for (auto const &context : utils::multimap_values(
+                             contexts.equal_range(address))) {
+                        if (auto value = context.get_register(op2.reg.value);
                             value) {
                             if (!value->is_symbolic()) {
                                 count = std::max(count, value->value());
@@ -643,11 +672,12 @@ size_t Restruc::get_field_count(ZydisDecodedOperand const &mem_op,
                     }
                     break;
                 case ZYDIS_OPERAND_TYPE_MEMORY:
-                    for (auto const &context : contexts) {
+                    for (auto const &context : utils::multimap_values(
+                             contexts.equal_range(address))) {
                         auto address =
                             Recontex::get_memory_address(op2, context)
                                 .raw_address_value();
-                        if (virt::Value value = context->get_memory(address, 8);
+                        if (virt::Value value = context.get_memory(address, 8);
                             !value.is_symbolic()) {
                             count = std::max(count, value.value());
                         }
