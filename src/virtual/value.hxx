@@ -3,6 +3,7 @@
 #include "core.hxx"
 
 #include <atomic>
+#include <compare>
 #include <optional>
 #include <variant>
 
@@ -59,9 +60,15 @@ namespace rstc::virt {
             return value();
         }
 
-        inline bool operator<(Value const &rhs) const
+        inline auto operator<=>(Value const &rhs) const
         {
-            return raw_value() < rhs.raw_value();
+            return raw_value() <=> rhs.raw_value();
+        }
+
+        // For std::equal_to, for std::unordered_map
+        inline bool operator==(Value const &rhs) const
+        {
+            return raw_value() == rhs.raw_value();
         }
 
     private:
@@ -76,4 +83,14 @@ namespace rstc::virt {
                               intptr_t offset = 0,
                               uintptr_t id = 0);
 
+}
+
+namespace std {
+    template<>
+    struct hash<rstc::virt::Value> {
+        size_t operator()(rstc::virt::Value const &value) const
+        {
+            return value.raw_value();
+        }
+    };
 }
