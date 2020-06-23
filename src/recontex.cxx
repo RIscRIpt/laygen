@@ -226,6 +226,7 @@ void Recontex::analyze_flo(Flo &flo,
                                                 context,
                                                 op.mem.index);
                         }
+                        break;
                     default: break;
                     }
                 }
@@ -239,11 +240,7 @@ void Recontex::analyze_flo(Flo &flo,
         if (!instr || contexts.empty()) {
             break;
         }
-        if (instr->mnemonic == ZYDIS_MNEMONIC_CALL) {
-            Contexts next_contexts;
-            update_contexts_after_unknown_call(contexts, address);
-        }
-        else if (Flo::is_any_jump(instr->mnemonic)) {
+        if (Flo::is_any_jump(instr->mnemonic)) {
             bool unconditional_jump = instr->mnemonic == ZYDIS_MNEMONIC_JMP;
             auto dsts = flo.get_jump_destinations(address, *instr, contexts);
             for (auto dst : dsts) {
@@ -348,7 +345,10 @@ void Recontex::emulate(Address address,
     using namespace std::placeholders;
 
     switch (instruction.mnemonic) {
-    case ZYDIS_MNEMONIC_MOV: {
+    case ZYDIS_MNEMONIC_MOV:
+    case ZYDIS_MNEMONIC_MOVZX:
+    case ZYDIS_MNEMONIC_MOVSX:
+    case ZYDIS_MNEMONIC_MOVSXD: {
         emulate_instruction(
             instruction,
             context,
@@ -541,6 +541,8 @@ void Recontex::emulate_instruction_call(
     Address address)
 {
     assert(instruction.mnemonic == ZYDIS_MNEMONIC_CALL);
+    // Assume RSP will be the same after the call
+    /*
     if (auto rsp = context.get_register(ZYDIS_REGISTER_RSP);
         rsp && !rsp->is_symbolic()) {
         auto new_rsp = rsp->value() - 8;
@@ -549,6 +551,12 @@ void Recontex::emulate_instruction_call(
         context.set_memory(new_rsp, virt::make_value(address, return_address));
         context.set_register(ZYDIS_REGISTER_RSP,
                              virt::make_value(address, new_rsp));
+    }
+    */
+    // Reset volatile registers
+    for (auto volatile_register : volatile_registers_) {
+        context.set_register(volatile_register,
+                             virt::make_symbolic_value(address));
     }
 }
 
@@ -766,26 +774,6 @@ Contexts Recontex::make_flo_initial_contexts(Flo &flo)
     Contexts contexts;
     contexts.emplace(std::move(c));
     return contexts;
-}
-
-void Recontex::update_contexts_after_unknown_call(Contexts &contexts,
-                                                  Address caller)
-{
-    Contexts new_contexts;
-    std::transform(contexts.begin(),
-                   contexts.end(),
-                   std::inserter(new_contexts, new_contexts.end()),
-                   [caller](Context const &context) {
-                       auto new_context = context.make_child();
-                       // Reset vlatile registers
-                       for (auto volatile_register : volatile_registers_) {
-                           new_context.set_register(
-                               volatile_register,
-                               virt::make_symbolic_value(caller));
-                       }
-                       return new_context;
-                   });
-    contexts = std::move(new_contexts);
 }
 
 bool Recontex::instruction_has_memory_access(
