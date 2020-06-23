@@ -19,6 +19,7 @@ namespace rstc {
     public:
         struct StrucDomain {
             std::shared_ptr<Struc> struc;
+            Flo const *base_flo;
             std::map<Address, ZydisDecodedInstruction const *>
                 relevant_instructions;
             std::unordered_map<Address, ZydisRegister> base_regs;
@@ -60,18 +61,18 @@ namespace rstc {
 
         void inter_link_flo_strucs(Flo &flo);
         void inter_link_flo_strucs_via_stack(Flo const &flo,
-                                             StrucDomain const &sw,
+                                             StrucDomain const &sd,
                                              unsigned argument);
         void inter_link_flo_strucs_via_register(Flo const &flo,
-                                                StrucDomain const &sw);
-        Address find_ref_sw_base(virt::Value const &value,
+                                                StrucDomain const &sd);
+        Address find_ref_sd_base(virt::Value const &value,
                                  FloDomain const &ref_flo_info);
-        ZydisRegister find_ref_sw_base_reg(Address ref_sw_base,
+        ZydisRegister find_ref_sd_base_reg(Address ref_sd_base,
                                            FloDomain const &ref_flo_info);
         void inter_link_flo_strucs(Flo const &flo,
-                                   StrucDomain const &sw,
+                                   StrucDomain const &sd,
                                    Flo const &ref_flo,
-                                   Address ref_sw_base);
+                                   Address ref_sd_base);
 
         void merge_strucs(Struc &dst, Struc const &src);
 
@@ -95,7 +96,9 @@ namespace rstc {
         PE const &pe_;
 
         std::mutex modify_access_domains_mutex_;
+        std::mutex modify_access_strucs_mutex_;
         std::map<Address, FloDomain> domains_;
+        std::map<std::string, std::shared_ptr<Struc>> strucs_;
 
         size_t max_analyzing_threads_;
         std::atomic<size_t> analyzing_threads_count_ = 0;
