@@ -213,10 +213,7 @@ Registers::Registers(Registers const *parent)
 
 std::optional<Value> Registers::get(ZydisRegister zydis_reg) const
 {
-    if (auto it = reg_promotion_map_.find(zydis_reg);
-        it != reg_promotion_map_.end()) {
-        zydis_reg = it->second;
-    }
+    zydis_reg = promote(zydis_reg);
     Reg reg;
     if (auto it = register_map.find(zydis_reg); it != register_map.end()) {
         reg = it->second;
@@ -254,13 +251,9 @@ std::optional<Value> Registers::get(ZydisRegister zydis_reg) const
 // TODO: use register size
 void Registers::set(ZydisRegister zydis_reg, Value value)
 {
-    auto promoted_reg = zydis_reg;
-    if (auto it = reg_promotion_map_.find(zydis_reg);
-        it != reg_promotion_map_.end()) {
-        promoted_reg = it->second;
-    }
+    zydis_reg = promote(zydis_reg);
     Reg reg;
-    if (auto it = register_map.find(promoted_reg); it != register_map.end()) {
+    if (auto it = register_map.find(zydis_reg); it != register_map.end()) {
         reg = it->second;
     }
     else {
@@ -334,23 +327,26 @@ void Registers::set(ZydisRegister zydis_reg, Value value)
 
 bool Registers::is_tracked(ZydisRegister zydis_reg) const
 {
-    if (auto it = reg_promotion_map_.find(zydis_reg);
-        it != reg_promotion_map_.end()) {
-        zydis_reg = it->second;
-    }
+    zydis_reg = promote(zydis_reg);
     return register_map.contains(zydis_reg);
 }
 
 std::optional<Registers::Reg> Registers::from_zydis(ZydisRegister zydis_reg)
 {
-    if (auto it = reg_promotion_map_.find(zydis_reg);
-        it != reg_promotion_map_.end()) {
-        zydis_reg = it->second;
-    }
+    zydis_reg = promote(zydis_reg);
     if (auto it = register_map.find(zydis_reg); it != register_map.end()) {
         return it->second;
     }
     return std::nullopt;
+}
+
+ZydisRegister Registers::promote(ZydisRegister zydis_reg)
+{
+    if (auto it = reg_promotion_map_.find(zydis_reg);
+        it != reg_promotion_map_.end()) {
+        zydis_reg = it->second;
+    }
+    return zydis_reg;
 }
 
 void Registers::initialize_holder(Holder &holder, size_t begin, size_t end)
