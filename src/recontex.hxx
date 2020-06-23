@@ -121,8 +121,6 @@ namespace rstc {
             return child_contexts;
         }
 
-        static void update_contexts_after_unknown_call(Contexts &contexts,
-                                                       Address caller);
         static bool
         instruction_has_memory_access(ZydisDecodedInstruction const &instr);
         static bool operand_has_memory_access(ZydisDecodedOperand const &op);
