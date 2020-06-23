@@ -12,10 +12,10 @@
 
 using namespace rstc;
 
-#define DEBUG_ANALYSIS
-#define DEBUG_INTRA_LINK
-#define DEBUG_INTER_LINK
-#define DEBUG_MERGE
+//#define DEBUG_ANALYSIS
+//#define DEBUG_INTRA_LINK
+//#define DEBUG_INTER_LINK
+//#define DEBUG_MERGE
 
 Restruc::Restruc(Reflo const &reflo, Recontex const &recontex)
     : reflo_(reflo)
@@ -240,6 +240,9 @@ void Restruc::intra_link_flo_strucs(Flo &flo,
     std::clog << "Linking strucs...\n";
 #endif
     for (auto &[value, sd] : flo_domain.strucs) {
+        if (!value.source()) {
+            continue;
+        }
         auto const &instruction = *flo.get_instruction(value.source());
         if (instruction.mnemonic == ZYDIS_MNEMONIC_MOV) {
             auto const &src = instruction.operands[1];
