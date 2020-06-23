@@ -17,19 +17,17 @@ namespace rstc {
 
     class Restruc {
     public:
-        struct StrucWrapper {
-            std::unique_ptr<Struc> struc;
+        struct StrucDomain {
+            std::shared_ptr<Struc> struc;
             std::map<Address, ZydisDecodedInstruction const *>
                 relevant_instructions;
-            ZydisRegister base_reg;
+            std::unordered_map<Address, ZydisRegister> base_regs;
         };
 
-        using FloStrucs = std::multimap<Address, StrucWrapper>;
-
-        struct FloInfo {
-            FloStrucs strucs;
-            std::map<Address, ZydisRegister> base_map;
-            std::map<virt::Value, ZydisRegister> root_map;
+        struct FloDomain {
+            std::unordered_map<virt::Value, StrucDomain> strucs;
+            std::unordered_map<virt::Value, ZydisRegister> root_map;
+            std::unordered_map<Address, ZydisRegister> base_map;
 
             inline bool empty() const
             {
@@ -45,34 +43,33 @@ namespace rstc {
         void dump(std::ostream &os);
 
     private:
-        using VirtValueGroups = std::map<virt::Value, StrucWrapper>;
+        using ValueGroups = std::map<virt::Value, StrucDomain>;
 
-        FloInfo *get_flo_info(Flo const &flo);
+        FloDomain *get_flo_domain(Flo const &flo);
 
         void run_analysis(Flo &flo, void (Restruc::*callback)(Flo &));
         void wait_for_analysis();
 
         void analyze_flo(Flo &flo);
-        void create_flo_strucs(Flo &flo,
-                               FloInfo &flo_info,
-                               VirtValueGroups &&groups);
+        void
+        create_flo_strucs(Flo &flo, FloDomain &flo_info, ValueGroups &&groups);
         void intra_link_flo_strucs(Flo &flo,
                                    Recontex::FloContexts const &flo_contexts,
-                                   FloInfo &flo_ig);
-        void add_flo_info(Flo &flo, FloInfo &&flo_ig);
+                                   FloDomain &flo_ig);
+        void add_flo_domain(Flo &flo, FloDomain &&flo_ig);
 
         void inter_link_flo_strucs(Flo &flo);
         void inter_link_flo_strucs_via_stack(Flo const &flo,
-                                             StrucWrapper const &sw,
+                                             StrucDomain const &sw,
                                              unsigned argument);
         void inter_link_flo_strucs_via_register(Flo const &flo,
-                                                StrucWrapper const &sw);
+                                                StrucDomain const &sw);
         Address find_ref_sw_base(virt::Value const &value,
-                                 FloInfo const &ref_flo_info);
+                                 FloDomain const &ref_flo_info);
         ZydisRegister find_ref_sw_base_reg(Address ref_sw_base,
-                                           FloInfo const &ref_flo_info);
+                                           FloDomain const &ref_flo_info);
         void inter_link_flo_strucs(Flo const &flo,
-                                   StrucWrapper const &sw,
+                                   StrucDomain const &sw,
                                    Flo const &ref_flo,
                                    Address ref_sw_base);
 
@@ -97,8 +94,8 @@ namespace rstc {
         Recontex const &recontex_;
         PE const &pe_;
 
-        std::mutex modify_access_infos_mutex_;
-        std::map<Address, FloInfo> infos_;
+        std::mutex modify_access_domains_mutex_;
+        std::map<Address, FloDomain> domains_;
 
         size_t max_analyzing_threads_;
         std::atomic<size_t> analyzing_threads_count_ = 0;
