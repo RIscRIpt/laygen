@@ -289,7 +289,9 @@ void Flo::add_cycle(Contexts const &contexts, Address first, Address last)
 
 void Flo::add_reference(Address reference)
 {
-    references_.insert(reference);
+    if (reference) {
+        references_.insert(reference);
+    }
 }
 
 void Flo::add_jump(Jump::Type type, Address dst, Address src)
