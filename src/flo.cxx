@@ -250,11 +250,15 @@ void Flo::add_cycle(Contexts const &contexts, Address first, Address last)
         auto jt = it;
         for (; jt->first >= first; --jt) {
             if (modifies_flags_register(*jt->second)) {
-                exit_conditions.emplace(
-                    std::piecewise_construct,
-                    std::forward_as_tuple(jt->second->operands[0].reg.value),
-                    std::forward_as_tuple(jt->second.get(),
-                                          it->second->mnemonic));
+                auto const &op = jt->second->operands[0];
+                if (op.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                    exit_conditions.emplace(
+                        std::piecewise_construct,
+                        std::forward_as_tuple(
+                            virt::Registers::promote(op.reg.value)),
+                        std::forward_as_tuple(jt->second.get(),
+                                              it->second->mnemonic));
+                }
                 break;
             }
         }
