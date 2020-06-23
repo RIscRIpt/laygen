@@ -406,13 +406,7 @@ void Restruc::inter_link_flo_strucs_via_register(Flo const &flo,
                   << sd.struc->name() << '\n';
 #endif
         auto const ref_flo = reflo_.get_flo_by_address(ref);
-#ifndef NDEBUG
-        if (!ref_flo) {
-            continue;
-        }
-#else
         assert(ref_flo);
-#endif
         Address ref_sd_base = nullptr;
         auto const &ref_flo_contexts = recontex_.get_contexts(*ref_flo);
         auto ref_flo_domain = get_flo_domain(*ref_flo);
