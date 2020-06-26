@@ -499,8 +499,9 @@ void Restruc::inter_link_flo_strucs(Flo const &flo,
                           << parent_struc.name() << '\n';
 #endif
                 {
-                    std::scoped_lock<std::mutex> modify_guard(
-                        sd.struc->mutex());
+                    std::scoped_lock<std::mutex, std::mutex> modify_guard(
+                        sd.struc->mutex(),
+                        parent_struc.mutex());
                     for (auto const &field : utils::multimap_values(
                              parent_struc.fields().equal_range(offset))) {
                         if (field.type() == Struc::Field::Pointer
@@ -508,10 +509,6 @@ void Restruc::inter_link_flo_strucs(Flo const &flo,
                             merge_strucs(*sd.struc, *field.struc());
                         }
                     }
-                }
-                {
-                    std::scoped_lock<std::mutex> modify_guard(
-                        parent_struc.mutex());
                     parent_struc.set_struc_ptr(offset, sd.struc.get());
                 }
             }
