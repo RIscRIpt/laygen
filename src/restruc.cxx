@@ -265,7 +265,9 @@ void Restruc::intra_link_flo_strucs(Flo &flo,
                         std::clog << "Linking " << sd.struc->name() << " with "
                                   << parent_struc.name() << '\n';
 #endif
-                        parent_struc.set_struc_ptr(offset, sd.struc.get());
+                        parent_struc.add_pointer_field(offset,
+                                                       1,
+                                                       sd.struc.get());
                     }
                 }
             }
@@ -382,10 +384,12 @@ void Restruc::inter_link_flo_strucs_via_stack(Flo const &flo,
                 }
             }
         }
+        /*
         if (!ref_sd_base) {
             inter_link_flo_strucs_via_stack(*ref_flo, sd, argument);
             continue;
         }
+        */
         inter_link_flo_strucs(flo, sd, *ref_flo, ref_sd_base);
     }
 }
@@ -431,10 +435,12 @@ void Restruc::inter_link_flo_strucs_via_register(Flo const &flo,
                 }
             }
         }
+        /*
         if (!ref_sd_base) {
             inter_link_flo_strucs_via_register(*ref_flo, sd);
             continue;
         }
+        */
         inter_link_flo_strucs(flo, sd, *ref_flo, ref_sd_base);
     }
 }
@@ -509,7 +515,7 @@ void Restruc::inter_link_flo_strucs(Flo const &flo,
                             merge_strucs(*sd.struc, *field.struc());
                         }
                     }
-                    parent_struc.set_struc_ptr(offset, sd.struc.get());
+                    parent_struc.add_pointer_field(offset, 1, sd.struc.get());
                 }
             }
         }

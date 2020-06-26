@@ -31,9 +31,25 @@ Struc::Field::Field(Type type,
     }
 }
 
-bool Struc::Field::is_pointer_alias() const
+bool Struc::Field::is_pointer_alias(size_t) const
 {
     return size_ == 8 && (type_ == Int || type_ == UInt || type_ == Pointer);
+}
+
+bool Struc::Field::is_float_alias(size_t size) const
+{
+    if (size_ != size) {
+        return false;
+    }
+    return type_ == Int || type_ == UInt || type_ == Float;
+}
+
+bool Struc::Field::is_typed_int_alias(size_t size) const
+{
+    if (size_ != size) {
+        return false;
+    }
+    return type_ == Int || type_ == UInt || type_ == Float || type_ == Pointer;
 }
 
 std::string Struc::Field::type_to_string() const
@@ -88,23 +104,31 @@ void Struc::add_int_field(size_t offset,
 {
     // Is 1, 2, 4, 8, 16, 32, 64
     assert(size > 0 && (size & (size - 1)) == 0 && size <= 64);
-    Field field(signedness == Field::Unsigned ? Field::UInt : Field::Int,
-                size,
-                count,
-                Atomic);
-    add_field(offset, std::move(field));
+    if (!((size == 4 || size == 8)
+          && has_aliases(offset, &Field::is_typed_int_alias, size))) {
+        Field field(signedness == Field::Unsigned ? Field::UInt : Field::Int,
+                    size,
+                    count,
+                    Atomic);
+        add_field(offset, std::move(field));
+    }
 }
 
 void Struc::add_float_field(size_t offset, size_t size, size_t count)
 {
+    using namespace std::placeholders;
     assert(size == 2 || size == 4 || size == 8 || size == 10);
-    Field field(Field::Float, size, count, Atomic);
+    size_t max_removed_count =
+        remove_aliases(offset, &Field::is_float_alias, size);
+    Field field(Field::Float, size, std::max(max_removed_count, count), Atomic);
     add_field(offset, std::move(field));
 }
 
 void Struc::add_pointer_field(size_t offset, size_t count, Struc const *struc)
 {
-    Field field(Field::Pointer, 8, count, struc);
+    size_t max_removed_count =
+        remove_aliases(offset, &Field::is_pointer_alias, 8);
+    Field field(Field::Pointer, 8, std::max(max_removed_count, count), struc);
     add_field(offset, std::move(field));
 }
 
@@ -120,7 +144,6 @@ void Struc::add_field(size_t offset, Field field)
         return;
     }
     utils::hash::mix(hash_, field.hash());
-    utils::hash::mix(hash_, offset);
     for (size_t i = 0; i < field.count(); i++) {
         field_set_.insert(offset + i * field.size());
     }
@@ -143,20 +166,37 @@ bool Struc::is_duplicate(size_t offset, Field const &field) const
     return false;
 }
 
-void Struc::set_struc_ptr(size_t offset, Struc const *struc)
+bool Struc::has_aliases(size_t offset,
+                        bool (Field::*alias_check)(size_t size) const,
+                        size_t size)
+{
+    for (auto it = fields_.find(offset);
+         it != fields_.end() && it->first == offset;
+         ++it) {
+        if ((it->second.*alias_check)(size)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+size_t Struc::remove_aliases(size_t offset,
+                             bool (Field::*alias_check)(size_t) const,
+                             size_t size)
 {
     size_t count = 1;
     for (auto it = fields_.find(offset);
          it != fields_.end() && it->first == offset;) {
         count = std::max(count, it->second.count());
-        if (it->second.is_pointer_alias()) {
+        if ((it->second.*alias_check)(size)) {
+            utils::hash::mix(hash_, it->second.hash());
             it = fields_.erase(it);
         }
         else {
             ++it;
         }
     }
-    add_pointer_field(offset, count, struc);
+    return count;
 }
 
 void Struc::merge_fields(size_t offset, Field const &field)
@@ -169,10 +209,14 @@ void Struc::merge_fields(size_t offset, Field const &field)
         return;
     }
     if (field.type() == Field::Pointer && field.struc()) {
-        set_struc_ptr(offset, field.struc());
-        return;
+        add_pointer_field(offset, 1, field.struc());
     }
-    add_field(offset, field);
+    else if (field.type() == Field::Float) {
+        add_float_field(offset, field.size(), field.count());
+    }
+    else {
+        add_field(offset, field);
+    }
 }
 
 size_t Struc::get_size() const

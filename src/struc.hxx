@@ -36,7 +36,9 @@ namespace rstc {
             inline size_t count() const { return count_; }
             inline class Struc const *struc() const { return struc_; }
 
-            bool is_pointer_alias() const;
+            bool is_pointer_alias(size_t) const;
+            bool is_float_alias(size_t size) const;
+            bool is_typed_int_alias(size_t size) const;
 
             inline bool operator==(Field const &rhs) const
             {
@@ -72,7 +74,6 @@ namespace rstc {
                                Struc const *struc = nullptr);
         void
         add_struc_field(size_t offset, Struc const *struc, size_t count = 1);
-        void set_struc_ptr(size_t offset, Struc const *struc);
         void merge_fields(size_t offset, Field const &field);
 
         inline size_t hash() const { return hash_; }
@@ -95,6 +96,12 @@ namespace rstc {
     private:
         void add_field(size_t offset, Field field);
         bool is_duplicate(size_t offset, Field const &field) const;
+        bool has_aliases(size_t offset,
+                         bool (Field::*alias_check)(size_t size) const,
+                         size_t size);
+        size_t remove_aliases(size_t offset,
+                              bool (Field::*alias_check)(size_t size) const,
+                              size_t size);
 
         size_t hash_;
 
