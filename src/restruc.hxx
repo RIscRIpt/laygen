@@ -22,7 +22,7 @@ namespace rstc {
             Flo const *base_flo;
             std::map<Address, ZydisDecodedInstruction const *>
                 relevant_instructions;
-            std::unordered_map<Address, ZydisRegister> base_regs;
+            std::unordered_multimap<Address, ZydisRegister> base_regs;
         };
 
         struct FloDomain {
@@ -51,6 +51,10 @@ namespace rstc {
 
     private:
         using ValueGroups = std::map<virt::Value, StrucDomain>;
+        struct StrucDomainBase {
+            Address source;
+            ZydisRegister root_reg;
+        };
 
         FloDomain *get_flo_domain(Flo const &flo);
 
@@ -66,13 +70,19 @@ namespace rstc {
         void add_flo_domain(Flo &flo, FloDomain &&flo_ig);
 
         void inter_link_flo_strucs(Flo &flo);
-        void inter_link_flo_strucs_via_stack(Flo const &flo,
-                                             StrucDomain const &sd,
-                                             unsigned argument);
-        void inter_link_flo_strucs_via_register(Flo const &flo,
-                                                StrucDomain const &sd);
-        Address find_ref_sd_base(virt::Value const &value,
-                                 FloDomain const &ref_flo_info);
+        void
+        inter_link_flo_strucs_via_stack(Flo const &flo,
+                                        StrucDomain const &sd,
+                                        unsigned argument,
+                                        std::unordered_set<Address> &visited);
+        void inter_link_flo_strucs_via_register(
+            Flo const &flo,
+            StrucDomain const &sd,
+            ZydisRegister base_reg,
+            std::unordered_set<Address> &visited);
+        std::optional<StrucDomainBase>
+        find_ref_sd_base(virt::Value const &value,
+                         FloDomain const &ref_flo_info);
         ZydisRegister find_ref_sd_base_reg(Address ref_sd_base,
                                            FloDomain const &ref_flo_info);
         void inter_link_flo_strucs(Flo const &flo,

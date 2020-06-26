@@ -305,6 +305,7 @@ void Restruc::inter_link_flo_strucs(Flo &flo)
         // this StrucDomain is based on register which
         // came from outside of this Flo.
         // Otherwise, it's a memory/stack-based StrucDomain.
+        std::unordered_set<Address> visited;
         if (value.source()) {
             auto const &instruction = *flo.get_instruction(value.source());
             auto const &src = instruction.operands[1];
@@ -322,32 +323,46 @@ void Restruc::inter_link_flo_strucs(Flo &flo)
                     !address.is_symbolic()) {
                     auto argument =
                         Recontex::stack_argument_number(address.value());
-                    inter_link_flo_strucs_via_stack(flo, sd, argument);
+                    inter_link_flo_strucs_via_stack(flo, sd, argument, visited);
                 }
             }
         }
         else {
-            inter_link_flo_strucs_via_register(flo, sd);
+            auto base_regs = sd.base_regs.equal_range(nullptr);
+            for (auto it = base_regs.first; it != base_regs.second; ++it) {
+                inter_link_flo_strucs_via_register(flo,
+                                                   sd,
+                                                   it->second,
+                                                   visited);
+            }
         }
     }
 }
 
-void Restruc::inter_link_flo_strucs_via_stack(Flo const &flo,
-                                              StrucDomain const &sd,
-                                              unsigned argument)
+void Restruc::inter_link_flo_strucs_via_stack(
+    Flo const &flo,
+    StrucDomain const &sd,
+    unsigned argument,
+    std::unordered_set<Address> &visited)
 {
 #ifdef DEBUG_INTER_LINK
     Dumper dumper;
 #endif
     for (auto ref : flo.get_references()) {
-        auto const ref_flo = reflo_.get_flo_by_address(ref);
-#ifndef NDEBUG
-        if (!ref_flo) {
+        if (visited.contains(ref)) {
             continue;
         }
-#else
-        assert(ref_flo);
+        visited.insert(ref);
+#ifdef DEBUG_INTER_LINK
+        std::clog << "Inter linking strucs of flo @ " << std::setfill('0')
+                  << std::hex << std::setw(8)
+                  << pe_.raw_to_virtual_address(flo.entry_point)
+                  << " via reference @ " << std::setw(8)
+                  << pe_.raw_to_virtual_address(ref) << " * "
+                  << sd.struc->name() << '\n';
 #endif
+        auto const ref_flo = reflo_.get_flo_by_address(ref);
+        assert(ref_flo);
         auto const &ref_flo_contexts = recontex_.get_contexts(*ref_flo);
         auto const &ref_instr = *ref_flo->get_instruction(ref);
         // Tail JMP have already return address on stack
@@ -366,7 +381,10 @@ void Restruc::inter_link_flo_strucs_via_stack(Flo const &flo,
                     rsp->raw_address_value() + stack_offset + argument * 8,
                     8);
                 if (!ref_flo->is_inside(arg.source())) {
-                    inter_link_flo_strucs_via_stack(*ref_flo, sd, argument);
+                    inter_link_flo_strucs_via_stack(*ref_flo,
+                                                    sd,
+                                                    argument,
+                                                    visited);
                     continue;
                 }
 #ifdef DEBUG_INTER_LINK
@@ -378,29 +396,46 @@ void Restruc::inter_link_flo_strucs_via_stack(Flo const &flo,
 #endif
                 if (auto new_ref_sd_base =
                         find_ref_sd_base(arg, *ref_flo_domain);
-                    ref_sd_base == nullptr
-                    || (new_ref_sd_base && new_ref_sd_base < ref_sd_base)) {
-                    ref_sd_base = new_ref_sd_base;
+                    (new_ref_sd_base && new_ref_sd_base->source)
+                    && (ref_sd_base == nullptr
+                        || (new_ref_sd_base->source < ref_sd_base))) {
+                    ref_sd_base = new_ref_sd_base->source;
+                }
+                else if (new_ref_sd_base && !new_ref_sd_base->source) {
+                    inter_link_flo_strucs_via_register(
+                        *ref_flo,
+                        sd,
+                        new_ref_sd_base->root_reg,
+                        visited);
                 }
             }
+            if (ref_sd_base) {
+                inter_link_flo_strucs(flo, sd, *ref_flo, ref_sd_base);
+            }
         }
-        /*
-        if (!ref_sd_base) {
-            inter_link_flo_strucs_via_stack(*ref_flo, sd, argument);
-            continue;
+        else {
+            // Flo might not have FloDomain
+            // if it is a single-instruction Flo
+            // let's try to deeper.
+            inter_link_flo_strucs_via_stack(*ref_flo, sd, argument, visited);
         }
-        */
-        inter_link_flo_strucs(flo, sd, *ref_flo, ref_sd_base);
     }
 }
 
-void Restruc::inter_link_flo_strucs_via_register(Flo const &flo,
-                                                 StrucDomain const &sd)
+void Restruc::inter_link_flo_strucs_via_register(
+    Flo const &flo,
+    StrucDomain const &sd,
+    ZydisRegister base_reg,
+    std::unordered_set<Address> &visited)
 {
 #ifdef DEBUG_INTER_LINK
     Dumper dumper;
 #endif
     for (auto ref : flo.get_references()) {
+        if (visited.contains(ref)) {
+            continue;
+        }
+        visited.insert(ref);
 #ifdef DEBUG_INTER_LINK
         std::clog << "Inter linking strucs of flo @ " << std::setfill('0')
                   << std::hex << std::setw(8)
@@ -417,42 +452,45 @@ void Restruc::inter_link_flo_strucs_via_register(Flo const &flo,
         if (ref_flo_domain) {
             for (auto const &context :
                  utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
-                for (auto [base_reg_source, base_reg] : sd.base_regs) {
-                    if (base_reg_source) {
-                        // We are interested in base_regs,
-                        // which source are outside Flo.
-                        continue;
+                if (auto val = context.get_register(base_reg); val) {
+                    if (auto new_ref_sd_base =
+                            find_ref_sd_base(*val, *ref_flo_domain);
+                        (new_ref_sd_base && new_ref_sd_base->source)
+                        && (ref_sd_base == nullptr
+                            || (new_ref_sd_base->source < ref_sd_base))) {
+                        ref_sd_base = new_ref_sd_base->source;
                     }
-                    if (auto val = context.get_register(base_reg); val) {
-                        if (auto new_ref_sd_base =
-                                find_ref_sd_base(*val, *ref_flo_domain);
-                            ref_sd_base == nullptr
-                            || (new_ref_sd_base
-                                && new_ref_sd_base < ref_sd_base)) {
-                            ref_sd_base = new_ref_sd_base;
-                        }
+                    else if (new_ref_sd_base && !new_ref_sd_base->root_reg) {
+                        inter_link_flo_strucs_via_register(
+                            *ref_flo,
+                            sd,
+                            new_ref_sd_base->root_reg,
+                            visited);
                     }
                 }
             }
+            if (ref_sd_base) {
+                inter_link_flo_strucs(flo, sd, *ref_flo, ref_sd_base);
+            }
         }
-        /*
-        if (!ref_sd_base) {
-            inter_link_flo_strucs_via_register(*ref_flo, sd);
-            continue;
+        else {
+            // Flo might not have FloDomain
+            // if it is a single-instruction Flo
+            // let's try to deeper.
+            inter_link_flo_strucs_via_register(*ref_flo, sd, base_reg, visited);
         }
-        */
-        inter_link_flo_strucs(flo, sd, *ref_flo, ref_sd_base);
     }
 }
 
-Address Restruc::find_ref_sd_base(virt::Value const &value,
-                                  FloDomain const &ref_flo_domain)
+std::optional<Restruc::StrucDomainBase>
+Restruc::find_ref_sd_base(virt::Value const &value,
+                          FloDomain const &ref_flo_domain)
 {
     if (auto it = ref_flo_domain.root_map.find(value);
         it != ref_flo_domain.root_map.end()) {
-        return it->first.source();
+        return StrucDomainBase{ it->first.source(), it->second };
     }
-    return nullptr;
+    return std::nullopt;
 }
 
 ZydisRegister Restruc::find_ref_sd_base_reg(Address ref_sd_base,
