@@ -43,6 +43,12 @@ namespace rstc {
 
         void dump(std::ostream &os);
 
+        inline std::map<std::string, std::shared_ptr<Struc>> const &
+        get_strucs() const
+        {
+            return strucs_;
+        }
+
     private:
         using ValueGroups = std::map<virt::Value, StrucDomain>;
 
