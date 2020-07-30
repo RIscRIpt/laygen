@@ -17,7 +17,7 @@ std::chrono::milliseconds measure(std::function<void(void)> fx)
 int wmain(int argc, wchar_t *argv[])
 {
     if (argc != 2) {
-        std::cerr << "recontext.exe <filename>\n";
+        std::cerr << "restruc.exe <filename>\n";
         return EXIT_FAILURE;
     }
 
