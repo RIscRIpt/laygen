@@ -23,12 +23,17 @@ namespace rstc {
             Inner,
             Outer,
         };
-        Jump(Type type, Address dst, Address src)
-            : type(type)
+        Jump(Type type,
+             ZydisDecodedInstruction const &ins,
+             Address dst,
+             Address src)
+            : ins(ins)
+            , type(type)
             , dst(dst)
             , src(src)
         {
         }
+        ZydisDecodedInstruction const &ins;
         Type const type;
         Address const dst;
         Address const src;
@@ -38,8 +43,11 @@ namespace rstc {
     using Jumps = std::multimap<Address, Jump>;
 
     struct Call : public Jump {
-        Call(Address dst, Address src, Address ret)
-            : Jump(Jump::Outer, dst, src)
+        Call(ZydisDecodedInstruction const &ins,
+             Address dst,
+             Address src,
+             Address ret)
+            : Jump(Jump::Outer, ins, dst, src)
             , ret(ret)
         {
         }
@@ -177,8 +185,14 @@ namespace rstc {
 
         bool stack_depth_is_ambiguous() const;
 
-        void add_jump(Jump::Type type, Address dst, Address src);
-        void add_call(Address dst, Address src, Address ret);
+        void add_jump(Jump::Type type,
+                      ZydisDecodedInstruction const &ins,
+                      Address dst,
+                      Address src);
+        void add_call(ZydisDecodedInstruction const &ins,
+                      Address dst,
+                      Address src,
+                      Address ret);
 
         std::optional<Address> end_;
         std::mutex modify_access_mutex_;

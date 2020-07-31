@@ -31,7 +31,7 @@ Flo::AnalysisResult Flo::analyze(Address address, Instruction instr)
     visit(address);
     if (instruction.mnemonic == ZYDIS_MNEMONIC_CALL) {
         if (auto dst = get_call_destination(address, instruction); dst) {
-            add_call(dst, address, next_address);
+            add_call(instruction, dst, address, next_address);
         }
     }
     else if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
@@ -46,7 +46,7 @@ Flo::AnalysisResult Flo::analyze(Address address, Instruction instr)
         auto dst = get_jump_destination(address, instruction);
         if (dst) {
             type = get_jump_type(dst, address, next_address, unconditional);
-            add_jump(type, dst, address);
+            add_jump(type, instruction, dst, address);
         }
         if (unconditional) {
             switch (type) {
@@ -205,7 +205,8 @@ void Flo::promote_unknown_jumps(Jump::Type type,
 {
     for (auto ijump = unknown_jumps_.begin(); ijump != unknown_jumps_.end();) {
         if (!predicate || predicate(ijump->second.dst)) {
-            add_jump(type, ijump->second.dst, ijump->second.src);
+            auto const &jump = ijump->second;
+            add_jump(type, jump.ins, jump.dst, jump.src);
             ijump = unknown_jumps_.erase(ijump);
         }
         else {
@@ -294,33 +295,40 @@ void Flo::add_reference(Address reference)
     }
 }
 
-void Flo::add_jump(Jump::Type type, Address dst, Address src)
+void Flo::add_jump(Jump::Type type,
+                   ZydisDecodedInstruction const &ins,
+                   Address dst,
+                   Address src)
 {
     switch (type) {
     case Jump::Inner:
-        inner_jumps_.emplace(dst, Jump(Jump::Inner, dst, src));
+        inner_jumps_.emplace(dst, Jump(Jump::Inner, ins, dst, src));
         break;
     case Jump::Outer:
-        outer_jumps_.emplace(dst, Jump(Jump::Outer, dst, src));
+        outer_jumps_.emplace(dst, Jump(Jump::Outer, ins, dst, src));
         break;
     case Jump::Unknown:
-        unknown_jumps_.emplace(dst, Jump(Jump::Unknown, dst, src));
+        unknown_jumps_.emplace(dst, Jump(Jump::Unknown, ins, dst, src));
         break;
     }
 }
 
-void Flo::add_call(Address dst, Address src, Address ret)
+void Flo::add_call(ZydisDecodedInstruction const &ins,
+                   Address dst,
+                   Address src,
+                   Address ret)
 {
-    calls_.emplace(dst, Call(dst, src, ret));
+    calls_.emplace(dst, Call(ins, dst, src, ret));
 }
 
 bool Flo::promote_unknown_jumps(Address dst, Jump::Type new_type)
 {
     bool promoted = false;
     while (true) {
-        if (auto jump = unknown_jumps_.extract(dst); !jump.empty()) {
+        if (auto hjump = unknown_jumps_.extract(dst); !hjump.empty()) {
             promoted = true;
-            add_jump(new_type, dst, jump.mapped().src);
+            auto const &jump = hjump.mapped();
+            add_jump(new_type, jump.ins, dst, jump.src);
         }
         else {
             break;
