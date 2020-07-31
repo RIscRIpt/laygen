@@ -229,7 +229,7 @@ void Reflo::run_flo_analysis(Address entry_point, Address reference)
             auto lock = std::unique_lock(flos_waiting_mutex_);
             flos_cv_.wait(lock, [this, entry_point] {
                 std::scoped_lock<std::mutex> flo_guard(flos_mutex_);
-                return flos_.find(entry_point) != flos_.end();
+                return flos_.contains(entry_point);
             });
         }
         auto &flo = *flos_.at(entry_point);
