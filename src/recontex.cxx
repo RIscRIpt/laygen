@@ -8,11 +8,14 @@
 #include <algorithm>
 #include <iostream>
 #include <iterator>
+#include <map>
 
 using namespace rstc;
 
 //#define DEBUG_ANALYSIS_PROGRESS
 //#define DEBUG_CONTEXT_PROPAGATION
+//#define DEBUG_OPTIMAL_COVERAGE
+//#define DEBUG_CONTEXT_PROPAGATION_VALUES
 
 ZydisRegister const Recontex::volatile_registers_[] = {
     ZYDIS_REGISTER_RAX,  ZYDIS_REGISTER_RCX,  ZYDIS_REGISTER_RDX,
@@ -137,10 +140,65 @@ void Recontex::run_analysis(Flo &flo)
                   << pe_.raw_to_virtual_address(flo.entry_point) << '\n';
 #endif
         FloContexts flo_contexts;
+        OptimalCoverage opt_cov(flo);
+        if (!opt_cov.analyze()) {
+#ifdef DEBUG_OPTIMAL_COVERAGE
+            std::clog << "Optimal Coverage for " << std::hex
+                      << std::setfill('0') << std::right << std::setw(8)
+                      << pe_.raw_to_virtual_address(flo.entry_point)
+                      << " cannot be calculated.\n";
+#endif
+            return;
+        }
+#ifdef DEBUG_OPTIMAL_COVERAGE
+        auto get_va = [&pe_ = pe_](Address a) -> DWORD {
+            return a ? pe_.raw_to_virtual_address(a) : 0;
+        };
+        std::clog << "Optimal Coverage @ " << std::hex << std::setfill('0')
+                  << std::right << std::setw(8) << get_va(flo.entry_point)
+                  << '\n';
+        std::clog << "Nodes:\n";
+        for (auto const &[_, node] : opt_cov.nodes()) {
+            std::clog << std::hex << get_va(node.source) << " -> ";
+            for (auto branch : node.branches) {
+                std::clog << std::hex << get_va(branch.branch) << ' ';
+            }
+            std::clog << '\n';
+        }
+        std::clog << "\nNodes order:\n";
+        std::vector<Address> nodes_order(opt_cov.nodes_order().size());
+        for (auto [node, index] : opt_cov.nodes_order()) {
+            nodes_order[index] = node;
+        }
+        for (auto node : nodes_order) {
+            std::clog << std::hex << get_va(node) << '\n';
+        }
+        std::clog << "\nLoops:\n";
+        for (auto const &loop : opt_cov.loops()) {
+            std::clog << std::hex << get_va(loop.src) << " -> "
+                      << get_va(loop.dst) << '\n';
+        }
+        std::clog << "\nUseless edges:\n";
+        for (auto const &edge : opt_cov.useless_edges()) {
+            std::clog << std::hex << get_va(edge.src) << " -> "
+                      << get_va(edge.dst) << '\n';
+        }
+        if (opt_cov.paths().size() < 32) {
+            std::clog << "\nOptimal paths:\n";
+            for (auto const &path : opt_cov.paths()) {
+                for (auto [jump, branch] : path) {
+                    std::clog << std::hex << get_va(jump)
+                              << (branch ? '+' : '-') << ' ';
+                }
+                std::clog << '\n';
+            }
+        }
+        std::clog << '\n';
+#endif
         analyze_flo(flo,
                     flo_contexts,
-                    make_flo_initial_contexts(flo),
-                    flo.entry_point);
+                    opt_cov.paths(),
+                    make_flo_initial_contexts(flo));
         {
             std::scoped_lock<std::mutex> add_contexts_guard(
                 modify_access_contexts_mutex_);
@@ -159,129 +217,114 @@ void Recontex::wait_for_analysis()
 
 void Recontex::analyze_flo(Flo &flo,
                            FloContexts &flo_contexts,
-                           Contexts contexts,
-                           Address address,
-                           Address end,
-                           std::unordered_map<Address, size_t> visited)
+                           OptimalCoverage::Paths const &optimal_paths,
+                           Contexts contexts)
 {
-    if (!end) {
-        auto last_instr = flo.get_disassembly().rbegin();
-        end = last_instr->first + last_instr->second->length;
-    }
-    else {
-        // 2nd (or more) visit
-        filter_contexts(flo_contexts, address, contexts);
-        if (contexts.empty()) {
-            return;
+    for (auto const &optimal_path : optimal_paths) {
+#ifdef DEBUG_OPTIMAL_COVERAGE
+        std::clog << "Using path: ";
+        for (auto [jump, branch] : optimal_path) {
+            std::clog << std::hex << pe_.raw_to_virtual_address(jump)
+                      << (branch ? '+' : '-') << ' ';
         }
-    }
-    // Visit visited instructions without going deeper.
-    while (address && address < end && !contexts.empty()
-           && visited[address] < 2) {
-        visited[address]++;
-#ifdef DEBUG_CONTEXT_PROPAGATION
-        DWORD va = pe_.raw_to_virtual_address(address);
+        std::clog << '\n';
 #endif
-        auto propagation_result =
-            propagate_contexts(flo, flo_contexts, address, std::move(contexts));
-        contexts = std::move(propagation_result.new_contexts);
-        auto const instr = propagation_result.instruction;
+        auto next_node = optimal_path.begin();
+        auto last_instr = flo.get_disassembly().rbegin();
+        auto end = last_instr->first + last_instr->second->length;
+        auto address = flo.entry_point;
+        while (address && address < end && !contexts.empty()) {
 #ifdef DEBUG_CONTEXT_PROPAGATION
-        std::clog << std::dec << std::setfill(' ') << std::setw(5)
-                  << contexts.size() << "ctx ";
-        if (instr) {
-            Dumper dumper;
-            dumper.dump_instruction(std::clog, va, *instr);
-            // Read values
-            for (size_t i = 0; i < instr->operand_count; i++) {
-                auto const &op = instr->operands[i];
-                if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
-                    continue;
-                }
-                for (auto const &context : contexts) {
-                    switch (op.type) {
-                    case ZYDIS_OPERAND_TYPE_REGISTER:
-                        if (op.visibility
-                            == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
-                            dump_register_value(std::clog,
-                                                dumper,
-                                                reflo_,
-                                                context,
-                                                op.reg.value);
+            DWORD va = pe_.raw_to_virtual_address(address);
+#endif
+            auto propagation_result = propagate_contexts(flo,
+                                                         flo_contexts,
+                                                         address,
+                                                         std::move(contexts));
+            contexts = std::move(propagation_result.new_contexts);
+            auto const instr = propagation_result.instruction;
+#ifdef DEBUG_CONTEXT_PROPAGATION
+            std::clog << std::dec << std::setfill(' ') << std::setw(5)
+                      << std::right << contexts.size() << "/" << std::setw(5)
+                      << std::left << flo_contexts.count(address);
+            if (instr) {
+                Dumper dumper;
+                dumper.dump_instruction(std::clog, va, *instr);
+    #ifdef DEBUG_CONTEXT_PROPAGATION_VALUES
+                // Read values
+                for (size_t i = 0; i < instr->operand_count; i++) {
+                    auto const &op = instr->operands[i];
+                    if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
+                        continue;
+                    }
+                    for (auto const &context : contexts) {
+                        switch (op.type) {
+                        case ZYDIS_OPERAND_TYPE_REGISTER:
+                            if (op.visibility
+                                == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
+                                dump_register_value(std::clog,
+                                                    dumper,
+                                                    reflo_,
+                                                    context,
+                                                    op.reg.value);
+                            }
+                            break;
+                        case ZYDIS_OPERAND_TYPE_MEMORY:
+                            if (op.mem.base != ZYDIS_REGISTER_NONE
+                                && op.mem.base != ZYDIS_REGISTER_RIP) {
+                                dump_register_value(std::clog,
+                                                    dumper,
+                                                    reflo_,
+                                                    context,
+                                                    op.mem.base);
+                            }
+                            if (op.mem.index != ZYDIS_REGISTER_NONE) {
+                                dump_register_value(std::clog,
+                                                    dumper,
+                                                    reflo_,
+                                                    context,
+                                                    op.mem.index);
+                            }
+                            break;
+                        default: break;
                         }
-                        break;
-                    case ZYDIS_OPERAND_TYPE_MEMORY:
-                        if (op.mem.base != ZYDIS_REGISTER_NONE
-                            && op.mem.base != ZYDIS_REGISTER_RIP) {
-                            dump_register_value(std::clog,
-                                                dumper,
-                                                reflo_,
-                                                context,
-                                                op.mem.base);
-                        }
-                        if (op.mem.index != ZYDIS_REGISTER_NONE) {
-                            dump_register_value(std::clog,
-                                                dumper,
-                                                reflo_,
-                                                context,
-                                                op.mem.index);
-                        }
-                        break;
-                    default: break;
                     }
                 }
+    #endif
             }
-        }
-        else {
-            std::clog << std::hex << std::setfill('0') << std::setw(8)
-                      << pe_.raw_to_virtual_address(address) << '\n';
-        }
+            else {
+                std::clog << std::hex << std::setfill('0') << std::setw(8)
+                          << std::right << pe_.raw_to_virtual_address(address)
+                          << '\n';
+            }
 #endif
-        if (!instr || contexts.empty()) {
-            break;
-        }
-        if (Flo::is_any_jump(instr->mnemonic)) {
-            bool unconditional_jump = instr->mnemonic == ZYDIS_MNEMONIC_JMP;
-            auto dsts = flo.get_jump_destinations(address, *instr, contexts);
-            for (auto dst : dsts) {
-                // Analyze only loops (inner backward jumps)
-                if (dst >= address || !flo.is_inside(dst)) {
-                    continue;
+            if (!instr || contexts.empty()) {
+                break;
+            }
+            assert(next_node == optimal_path.end()
+                   || next_node->jump >= address);
+            if (Flo::is_any_jump(instr->mnemonic)) {
+                if (next_node != optimal_path.end()) {
+                    assert(next_node->jump == address);
+                    if (next_node->take) {
+                        assert(instr->operand_count > 0);
+                        auto const &op = instr->operands[0];
+                        assert(op.type == ZYDIS_OPERAND_TYPE_IMMEDIATE);
+                        address += instr->length + op.imm.value.s;
+                        ++next_node;
+                        continue;
+                    }
+                    ++next_node;
                 }
-                analyze_flo(flo,
-                            flo_contexts,
-                            make_child_contexts(contexts),
-                            dst,
-                            address,
-                            visited);
-                flo.add_cycle(contexts, dst, address);
             }
-            if (unconditional_jump) {
+            else if (instr->mnemonic == ZYDIS_MNEMONIC_RET) {
+                assert(next_node == optimal_path.end()
+                       || (next_node->jump == address
+                           && std::next(next_node) == optimal_path.end()));
                 break;
             }
+            address += instr->length;
         }
-        else if (instr->mnemonic == ZYDIS_MNEMONIC_RET) {
-            // Check if next instruction is inside,
-            // if so set contexts from previous inner jump
-            // with current destination, otherwise stop.
-            if (!flo.is_inside(address + instr->length)) {
-                break;
-            }
-            auto const &inner_jumps = flo.get_inner_jumps();
-            auto it = inner_jumps.lower_bound(address + instr->length);
-            assert(it != inner_jumps.end());
-            while (it != inner_jumps.end()
-                   && it->first == address + instr->length) {
-                ++it;
-            }
-            auto const &jump = std::prev(it)->second;
-            auto jump_contexts =
-                utils::multimap_values(flo_contexts.equal_range(jump.src));
-            contexts = make_child_contexts(jump_contexts);
-            address = jump.dst;
-            continue;
-        }
-        address += instr->length;
     }
 }
 
@@ -954,4 +997,276 @@ void Recontex::dump_instruction_history(
             }
         }
     }
+}
+
+Recontex::OptimalCoverage::OptimalCoverage(Flo const &flo)
+    : flo_(flo)
+{
+}
+
+bool Recontex::OptimalCoverage::analyze()
+{
+    if (!build_nodes()) {
+        return false;
+    }
+    assert(validate_nodes());
+    normalize_nodes();
+    top_sort();
+    find_loops();
+    find_useless_edges();
+    build_paths();
+    return true;
+}
+
+bool Recontex::OptimalCoverage::build_nodes()
+{
+    auto const &disassembly = flo_.get_disassembly();
+    for (auto it = disassembly.begin(); it != disassembly.end(); ++it) {
+        auto const &instruction = *it->second;
+        if (Flo::is_any_jump(instruction.mnemonic)) {
+            Address dst = Flo::get_jump_destination(it->first, *it->second);
+            if (!dst) {
+                return false;
+            }
+            if (flo_.is_inside(dst)) {
+                std::list<Branch> branches;
+                Address src = it->first;
+                Address next = nullptr;
+                while (it != disassembly.end()
+                       && Flo::is_conditional_jump(it->second->mnemonic)) {
+                    Address dst =
+                        Flo::get_jump_destination(it->first, *it->second);
+                    if (!dst) {
+                        return false;
+                    }
+                    if (!flo_.is_inside(dst)) {
+                        break;
+                    }
+                    branches.emplace_back(it->first, dst, Branch::Conditional);
+                    next = it->first + it->second->length;
+                    ++it;
+                }
+                if (it != disassembly.end()) {
+                    if (it->second->mnemonic == ZYDIS_MNEMONIC_JMP) {
+                        auto dst =
+                            Flo::get_jump_destination(it->first, *it->second);
+                        if (!dst) {
+                            return false;
+                        }
+                        if (flo_.is_inside(dst)) {
+                            branches.emplace_front(it->first,
+                                                   dst,
+                                                   Branch::Unconditional);
+                        }
+                    }
+                    else if (next) {
+                        branches.emplace_front(std::prev(it)->first,
+                                               next,
+                                               Branch::Next);
+                    }
+                }
+                if (!branches.empty()) {
+                    nodes_.emplace(src, Node(src, std::move(branches)));
+                }
+                if (it == disassembly.end()) {
+                    break;
+                }
+            }
+            else if (dst) {
+                nodes_.emplace(it->first, Node(it->first, {}));
+                ends_.emplace(it->first);
+            }
+        }
+        else if (instruction.mnemonic == ZYDIS_MNEMONIC_RET) {
+            nodes_.emplace(it->first, Node(it->first, {}));
+            ends_.emplace(it->first);
+        }
+    }
+    return true;
+}
+
+bool Recontex::OptimalCoverage::validate_nodes()
+{
+    for (auto const &[_, node] : nodes_) {
+        if (node.branches.size() == 1) {
+            assert(node.branches.front().type == Branch::Unconditional);
+        }
+        else if (node.branches.size() > 1) {
+            assert(node.branches.front().type == Branch::Next
+                   || node.branches.front().type == Branch::Unconditional);
+            assert(node.branches.front().source >= std::next(node.branches.begin())->source);
+            for (auto it = std::next(node.branches.begin(), 2);
+                 it != node.branches.end();
+                 ++it) {
+                assert(it->source > std::prev(it)->source);
+            }
+        }
+    }
+    return true;
+}
+
+void Recontex::OptimalCoverage::normalize_nodes()
+{
+    for (auto &[_, node] : nodes_) {
+        for (auto &branch : node.branches) {
+            if (!branch.branch) {
+                continue;
+            }
+            if (auto it = nodes_.lower_bound(branch.branch);
+                it != nodes_.end()) {
+                branch.branch = it->first;
+            }
+        }
+    }
+}
+
+void Recontex::OptimalCoverage::top_sort()
+{
+    if (nodes_.empty()) {
+        return;
+    }
+    std::vector<Address> top_sort;
+    std::unordered_set<Address> visited;
+    std::function<void(Address)> dfs = [&](Address v) mutable {
+        auto it = nodes_.lower_bound(v);
+        Node const *node = nullptr;
+        if (it != nodes_.end()) {
+            node = &it->second;
+            v = node->source;
+        }
+        auto [_, inserted] = visited.insert(v);
+        if (!inserted) {
+            return;
+        }
+        if (node) {
+            for (auto branch : node->branches) {
+                dfs(branch.branch);
+            }
+        }
+        top_sort.push_back(v);
+    };
+    dfs(flo_.entry_point);
+    for (auto it = top_sort.rbegin(); it != top_sort.rend(); ++it) {
+        nodes_order_.emplace(*it, std::distance(top_sort.rbegin(), it));
+    }
+}
+
+void Recontex::OptimalCoverage::find_loops()
+{
+    for (auto const &[_, node] : nodes_) {
+        for (auto branch : node.branches) {
+            if (nodes_order_.at(branch.branch) <= nodes_order_.at(node.source)) {
+                loops_.emplace(node.source, branch.branch);
+            }
+        }
+    }
+}
+
+void Recontex::OptimalCoverage::find_useless_edges()
+{
+    auto is_reachable =
+        [&](Edge const &blocked, Address start, Address end) -> bool {
+        std::unordered_set<Address> visited;
+        std::function<bool(Address)> dfs;
+        auto check_node = [&](Edge const &edge) -> bool { return false; };
+        dfs = [&](Address v) -> bool {
+            if (auto it = nodes_order_.find(v);
+                it == nodes_order_.end() || it->second > nodes_order_[end]) {
+                return false;
+            }
+            visited.insert(v);
+            if (auto it = nodes_.find(v); it != nodes_.end()) {
+                auto const &node = it->second;
+                for (auto branch : node.branches) {
+                    Edge edge(node.source, branch.branch);
+                    if (edge != blocked && !loops_.contains(edge)) {
+                        if (edge.dst == end) {
+                            return true;
+                        }
+                        if (!visited.contains(edge.dst)) {
+                            if (dfs(edge.dst)) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        };
+        return dfs(start);
+    };
+    for (auto const &[_, node] : nodes_) {
+        if (node.branches.empty()) {
+            continue;
+        }
+        for (auto branch : node.branches) {
+            if (is_reachable(Edge(node.source, branch.branch),
+                             node.source,
+                             branch.branch)) {
+                useless_edges_.emplace(node.source, branch.branch);
+            }
+        }
+    }
+}
+
+void Recontex::OptimalCoverage::build_paths()
+{
+    if (nodes_.empty()) {
+        paths_.push_back(Path{});
+        return;
+    }
+    Edges visited_loops;
+    Path path;
+    std::function<void(Address)> dfs = [&](Address v) {
+        if (ends_.contains(v) || !nodes_.contains(v)) {
+            paths_.push_back(path);
+            return;
+        }
+        auto const &node = nodes_.at(v);
+        assert(!node.branches.empty());
+        size_t nodes_added = 0;
+        std::vector<std::list<Branch>::const_iterator> branches;
+        branches.reserve(node.branches.size());
+        for (auto it = std::next(node.branches.begin());
+             it != node.branches.end();
+             ++it) {
+            branches.push_back(it);
+        }
+        branches.push_back(node.branches.begin());
+        for (auto it : branches) {
+            auto const &branch = *it;
+            if (it != node.branches.begin() || nodes_added == 0) {
+                bool is_jump = branch.type == Branch::Conditional
+                               || branch.type == Branch::Unconditional;
+                path.emplace_back(branch.source, is_jump);
+                nodes_added++;
+            }
+            else {
+                assert(it == node.branches.begin());
+                path.back().take = false;
+                if (branch.type == Branch::Unconditional) {
+                    path.emplace_back(branch.source, true);
+                    nodes_added++;
+                }
+            }
+            // Visit edge
+            Edge edge(node.source, branch.branch);
+            bool loop = false;
+            if (loops_.contains(edge)) {
+                auto [_, inserted] = visited_loops.insert(edge);
+                if (!inserted) {
+                    continue;
+                }
+                loop = true;
+            }
+            if (!useless_edges_.contains(edge)) {
+                dfs(edge.dst);
+            }
+            if (loop) {
+                visited_loops.erase(edge);
+            }
+        }
+        path.erase(path.end() - nodes_added, path.end());
+    };
+    dfs(nodes_.lower_bound(flo_.entry_point)->first);
 }

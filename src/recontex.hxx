@@ -4,6 +4,9 @@
 #include "reflo.hxx"
 #include "struc.hxx"
 
+#include "utils/hash.hxx"
+
+#include <list>
 #include <ostream>
 
 namespace rstc {
@@ -33,6 +36,109 @@ namespace rstc {
         void debug(std::ostream &os);
 
     private:
+        class OptimalCoverage {
+        public:
+            struct Edge {
+                Edge(Address src, Address dst)
+                    : src(src)
+                    , dst(dst)
+                {
+                }
+                bool operator==(Edge const &other) const
+                {
+                    return src == other.src && dst == other.dst;
+                }
+                Address src, dst;
+            };
+
+            struct EdgeHash {
+                std::size_t operator()(Edge const &e) const
+                {
+                    std::size_t h = 0;
+                    utils::hash::combine(h, e.src);
+                    utils::hash::combine(h, e.dst);
+                    return h;
+                }
+            };
+
+            using Edges = std::unordered_set<Edge, EdgeHash>;
+
+            struct Branch {
+                enum Type {
+                    Conditional,
+                    Unconditional,
+                    Next,
+                };
+                Branch(Address source, Address branch, Type type)
+                    : source(source)
+                    , branch(branch)
+                    , type(type)
+                {
+                }
+                Address source;
+                Address branch;
+                Type type;
+            };
+
+            struct Node {
+                Node(Address source, std::list<Branch> branches)
+                    : source(source)
+                    , branches(std::move(branches))
+                {
+                }
+                Address source;
+                // Branches can be:
+                // (a) a single unconditional jump;
+                // (b) a step `Branch::Type::Next` or unconditional jump,
+                //     and a list of conditional jumps.
+                std::list<Branch> branches;
+            };
+
+            struct Decision {
+                Decision(Address jump, bool take)
+                    : jump(jump)
+                    , take(take)
+                {
+                }
+                Address jump;
+                bool take;
+            };
+
+            // Path is a set of decisions whether to jump or not at an address
+            using Path = std::vector<Decision>;
+            using Paths = std::vector<Path>;
+
+            OptimalCoverage(Flo const &flo);
+
+            bool analyze();
+
+            inline std::map<Address, Node> const &nodes() { return nodes_; }
+            inline std::map<Address, size_t> const &nodes_order()
+            {
+                return nodes_order_;
+            }
+            inline Edges const &loops() { return loops_; }
+            inline Edges const &useless_edges() { return useless_edges_; }
+            inline Paths const &paths() { return paths_; }
+
+        private:
+            bool build_nodes();
+            bool validate_nodes();
+            void normalize_nodes();
+            void top_sort();
+            void find_loops();
+            void find_useless_edges();
+            void build_paths();
+
+            Flo const &flo_;
+            std::unordered_set<Address> ends_;
+            std::map<Address, Node> nodes_;
+            std::map<Address, size_t> nodes_order_;
+            Edges loops_;
+            Edges useless_edges_;
+            Paths paths_;
+        };
+
         struct PropagationResult {
             Contexts new_contexts;
             ZydisDecodedInstruction const *instruction = nullptr;
@@ -55,10 +161,8 @@ namespace rstc {
 
         void analyze_flo(Flo &flo,
                          FloContexts &flo_contexts,
-                         Contexts contexts,
-                         Address address,
-                         Address end = nullptr,
-                         std::unordered_map<Address, size_t> visited = {});
+                         OptimalCoverage::Paths const &optimal_paths,
+                         Contexts contexts);
 
         void filter_contexts(FloContexts &flo_contexts,
                              Address address,

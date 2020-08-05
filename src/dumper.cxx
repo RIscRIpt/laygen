@@ -33,6 +33,6 @@ void Dumper::dump_instruction(std::ostream &os,
                                                buffer,
                                                sizeof(buffer),
                                                va));
-    os << std::hex << std::setfill('0') << std::setw(8) << va << "    "
-       << buffer << '\n';
+    os << std::hex << std::setfill('0') << std::setw(8) << std::right << va
+       << "    " << buffer << '\n';
 }

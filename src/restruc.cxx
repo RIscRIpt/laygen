@@ -140,9 +140,9 @@ void Restruc::analyze_flo(Flo &flo)
             }
             else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY
                      && op.mem.base != ZYDIS_REGISTER_NONE
-                     && op.mem.base != ZYDIS_REGISTER_RIP
-                     // TODO: also analyze stack
-                     && op.mem.base != ZYDIS_REGISTER_RSP) {
+                     // TODO: analyze stack
+                     && op.mem.base != ZYDIS_REGISTER_RSP
+                     && op.mem.base != ZYDIS_REGISTER_RIP) {
                 flo_domain.base_map.emplace(address, op.mem.base);
                 for (auto const &context : utils::multimap_values(
                          flo_contexts.equal_range(address))) {
@@ -158,6 +158,7 @@ void Restruc::analyze_flo(Flo &flo)
 #ifdef DEBUG_ANALYSIS
                         std::clog << "Saving base register @ " << std::hex
                                   << std::setw(8)
+                                  << pe_.raw_to_virtual_address(address) << ": "
                                   << pe_.raw_to_virtual_address(reg->source())
                                   << '\n';
 #endif
