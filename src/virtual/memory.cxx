@@ -3,6 +3,7 @@
 #include "utils/hash.hxx"
 
 #include <algorithm>
+#include <iterator>
 
 using namespace rstc;
 using namespace rstc::virt;
