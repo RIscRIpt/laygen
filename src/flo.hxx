@@ -146,6 +146,8 @@ namespace rstc {
 
         ZydisDecodedInstruction const *get_instruction(Address address) const;
 
+        inline PE const &get_pe() const { return pe_; }
+
         inline std::set<Address> const &get_references() const
         {
             return references_;
