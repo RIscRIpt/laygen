@@ -163,17 +163,21 @@ bool Reflo::can_split_flo(Flo &flo,
                                    flo.get_unknown_jumps(),
                                    flo.get_outer_jumps() }) {
             for (auto const &[_, jump] : jumps) {
+                // Cannot split if there are jumps across the split
+                bool cannot_split =
+                    (jump.src <= possible_split && jump.dst >= possible_split)
+                    || (jump.src >= possible_split
+                        && jump.dst <= possible_split);
 #ifdef DEBUG_FLO_SPLIT
                 DWORD va_src = pe_.raw_to_virtual_address(jump.src);
                 DWORD va_dst = pe_.raw_to_virtual_address(jump.dst);
                 std::clog << "jump.src = " << std::hex << va_src
-                          << ", va_dst = " << std::hex << va_dst
-                          << ", va_split = " << std::hex << va_split << " : "
-                          << (jump.src < possible_split
-                              && jump.dst >= possible_split)
+                          << ", jump.dst = " << std::hex << va_dst
+                          << ", split = " << std::hex << va_split << " : "
+                          << (cannot_split ? "cannot split" : "may split")
                           << '\n';
 #endif
-                if (jump.src < possible_split && jump.dst >= possible_split) {
+                if (cannot_split) {
                     can_split = false;
                     break;
                 }
@@ -183,7 +187,8 @@ bool Reflo::can_split_flo(Flo &flo,
             }
         }
 #ifdef DEBUG_FLO_SPLIT
-        std::clog << std::hex << va_ep << ": can_split " << can_split << " @ "
+        std::clog << std::hex << va_ep << ": "
+                  << (can_split ? "can split" : "cannot split") << " @ "
                   << va_split << '\n';
 #endif
         if (can_split) {
