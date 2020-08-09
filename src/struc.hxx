@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <iosfwd>
 #include <map>
 #include <mutex>
@@ -27,13 +28,16 @@ namespace rstc {
                 Signed,
             };
 
-            inline size_t hash() const { return hash_; }
             inline Type type() const { return type_; }
             inline size_t size() const
             {
                 return type_ != Struc ? size_ : struc_->get_size();
             }
             inline size_t count() const { return count_; }
+            inline class Struc *struc()
+            {
+                return const_cast<class Struc *>(struc_);
+            }
             inline class Struc const *struc() const { return struc_; }
 
             bool is_pointer_alias(size_t) const;
@@ -42,9 +46,8 @@ namespace rstc {
 
             inline bool operator==(Field const &rhs) const
             {
-                return hash_ == rhs.hash_ && type_ == rhs.type_
-                       && size_ == rhs.size_ && count_ && rhs.count_
-                       && struc_ == rhs.struc_;
+                return type_ == rhs.type_ && size_ == rhs.size_ && count_
+                       && rhs.count_ && struc_ == rhs.struc_;
             }
 
             std::string type_to_string() const;
@@ -58,9 +61,12 @@ namespace rstc {
             class Struc const *struc_;
             size_t size_;
             size_t count_;
+            // TODO: Create type priorities table
             Type type_;
-            size_t hash_;
         };
+
+        using MergeCallback =
+            std::function<void(Struc const &dst, Struc const &src)>;
 
         Struc(std::string name);
 
@@ -74,9 +80,12 @@ namespace rstc {
                                Struc const *struc = nullptr);
         void
         add_struc_field(size_t offset, Struc const *struc, size_t count = 1);
+        void merge(Struc const &src, MergeCallback merge_callback);
+        bool try_merge_struc_field_at_offset(size_t offset,
+                                             Field const &src_field,
+                                             MergeCallback merge_callback);
         void merge_fields(size_t offset, Field const &field);
 
-        inline size_t hash() const { return hash_; }
         inline std::string const &name() const { return name_; }
 
         size_t get_size() const;
@@ -87,11 +96,14 @@ namespace rstc {
             return fields_;
         }
 
-        static constexpr Struc const *const Atomic = nullptr;
+        static constexpr Struc *Atomic = nullptr;
 
         void print(std::ostream &os) const;
 
-        inline std::mutex &mutex() { return modify_access_mutex_; }
+        inline std::recursive_mutex &mutex() const
+        {
+            return modify_access_mutex_;
+        }
 
     private:
         void add_field(size_t offset, Field field);
@@ -103,13 +115,11 @@ namespace rstc {
                               bool (Field::*alias_check)(size_t size) const,
                               size_t size);
 
-        size_t hash_;
-
         std::string name_;
         std::multimap<size_t, Field> fields_;
         std::set<size_t> field_set_;
 
-        std::mutex modify_access_mutex_;
+        std::recursive_mutex mutable modify_access_mutex_;
     };
 
 }

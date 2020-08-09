@@ -90,7 +90,11 @@ namespace rstc {
                                    Flo const &ref_flo,
                                    Address ref_sd_base);
 
-        void merge_strucs(Struc &dst, Struc const &src);
+        void
+        try_merge_struc_field_at_offset(Struc &dst,
+                                        Struc const &src,
+                                        size_t offset,
+                                        Struc::MergeCallback merge_callback);
 
         std::string generate_struc_name(Flo const &flo,
                                         virt::Value const &value);
@@ -113,6 +117,11 @@ namespace rstc {
 
         std::mutex modify_access_domains_mutex_;
         std::mutex modify_access_strucs_mutex_;
+
+        // TODO: try to get rid of it: build graph of struct references and link
+        // them parallely
+        std::mutex merge_strucs_mutex_;
+
         std::map<Address, FloDomain> domains_;
         std::map<std::string, std::shared_ptr<Struc>> strucs_;
 

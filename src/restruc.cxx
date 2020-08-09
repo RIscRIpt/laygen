@@ -544,16 +544,25 @@ void Restruc::inter_link_flo_strucs(Flo const &flo,
                           << parent_struc.name() << '\n';
 #endif
                 {
-                    std::scoped_lock<std::mutex, std::mutex> modify_guard(
-                        sd.struc->mutex(),
+                    std::scoped_lock<std::mutex> merge_lock(
+                        merge_strucs_mutex_); // TODO: get rid of it
+                    try_merge_struc_field_at_offset(
+                        *sd.struc,
+                        parent_struc,
+                        offset,
+                        [this](Struc const &dst, Struc const &src) {
+#ifdef DEBUG_MERGE
+                            std::clog << "Merged " << src.name() << " into "
+                                      << dst.name() << '\n';
+#endif
+                            std::scoped_lock<std::mutex> modify_guard(
+                                modify_access_strucs_mutex_);
+                            strucs_.erase(src.name());
+                        });
+                }
+                {
+                    std::scoped_lock<std::recursive_mutex> modify_guard(
                         parent_struc.mutex());
-                    for (auto const &field : utils::multimap_values(
-                             parent_struc.fields().equal_range(offset))) {
-                        if (field.type() == Struc::Field::Pointer
-                            && field.struc()) {
-                            merge_strucs(*sd.struc, *field.struc());
-                        }
-                    }
                     parent_struc.add_pointer_field(offset, 1, sd.struc.get());
                 }
             }
@@ -561,22 +570,31 @@ void Restruc::inter_link_flo_strucs(Flo const &flo,
     }
 }
 
-void Restruc::merge_strucs(Struc &dst, Struc const &src)
+void Restruc::try_merge_struc_field_at_offset(
+    Struc &dst,
+    Struc const &src,
+    size_t offset,
+    Struc::MergeCallback merge_callback)
 {
-#ifdef DEBUG_MERGE
-    std::clog << "Merging " << src.name() << " into " << dst.name() << '\n';
-#endif
-    for (auto const &[offset, field] : src.fields()) {
-        dst.merge_fields(offset, field);
-        if (field.type() == Struc::Field::Pointer && field.struc()) {
-            std::scoped_lock<std::mutex> modify_guard(
-                modify_access_strucs_mutex_);
-            strucs_.erase(field.struc()->name());
-        }
+    if (&dst == &src) {
+        return;
     }
-    {
-        std::scoped_lock<std::mutex> modify_guard(modify_access_strucs_mutex_);
-        strucs_.erase(src.name());
+    std::scoped_lock<std::recursive_mutex> modify_guard(src.mutex());
+    for (auto it = std::reverse_iterator(src.fields().upper_bound(offset));
+         it != src.fields().rend();
+         ++it) {
+        auto &src_field = it->second;
+        auto src_field_offset = it->first;
+        auto src_field_offset_end =
+            src_field_offset + src_field.count() * src_field.size();
+        if (src_field_offset_end <= offset) {
+            break;
+        }
+        if (src_field.type() != Struc::Field::Type::Pointer
+            || !src_field.struc() || src_field_offset % 8 != offset % 8) {
+            continue;
+        }
+        dst.merge(*src_field.struc(), merge_callback);
     }
 }
 

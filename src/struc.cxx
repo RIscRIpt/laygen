@@ -1,7 +1,6 @@
 #include "struc.hxx"
 
 #include "utils/adapters.hxx"
-#include "utils/hash.hxx"
 
 #include <algorithm>
 #include <cassert>
@@ -18,17 +17,7 @@ Struc::Field::Field(Type type,
     , size_(size)
     , count_(count)
     , type_(type)
-    , hash_(0)
 {
-    utils::hash::mix(hash_, type_);
-    utils::hash::mix(hash_, size_);
-    utils::hash::mix(hash_, count_);
-    if (struc_) {
-        utils::hash::mix(hash_, struc_->hash());
-    }
-    else {
-        utils::hash::mix(hash_, nullptr);
-    }
 }
 
 bool Struc::Field::is_pointer_alias(size_t) const
@@ -104,8 +93,7 @@ void Struc::add_int_field(size_t offset,
 {
     // Is 1, 2, 4, 8, 16, 32, 64
     assert(size > 0 && (size & (size - 1)) == 0 && size <= 64);
-    if (!((size == 4 || size == 8)
-          && has_aliases(offset, &Field::is_typed_int_alias, size))) {
+    if (!has_aliases(offset, &Field::is_typed_int_alias, size)) {
         Field field(signedness == Field::Unsigned ? Field::UInt : Field::Int,
                     size,
                     count,
@@ -116,7 +104,6 @@ void Struc::add_int_field(size_t offset,
 
 void Struc::add_float_field(size_t offset, size_t size, size_t count)
 {
-    using namespace std::placeholders;
     assert(size == 2 || size == 4 || size == 8 || size == 10);
     size_t max_removed_count =
         remove_aliases(offset, &Field::is_float_alias, size);
@@ -143,24 +130,63 @@ void Struc::add_field(size_t offset, Field field)
     if (is_duplicate(offset, field)) {
         return;
     }
-    utils::hash::mix(hash_, field.hash());
-    for (size_t i = 0; i < field.count(); i++) {
-        field_set_.insert(offset + i * field.size());
+    {
+        std::scoped_lock<std::recursive_mutex> modify_guard(mutex());
+        for (size_t i = 0; i < field.count(); i++) {
+            field_set_.insert(offset + i * field.size());
+        }
+        fields_.emplace(offset, std::move(field));
     }
-    fields_.emplace(offset, std::move(field));
 }
 
 bool Struc::is_duplicate(size_t offset, Field const &field) const
 {
-    auto end_field = fields_.upper_bound(offset);
-    for (auto it = fields_.begin(); it != end_field; ++it) {
-        auto const &other = it->second;
-        auto other_offset = it->first;
-        auto end_offset = offset + (other.count() - 1) * other.size();
-        if (other_offset == offset || end_offset > offset) {
-            if (field.type() == other.type()) {
+    if (fields_.empty()) {
+        return false;
+    }
+    for (auto it = std::reverse_iterator(fields_.upper_bound(offset));
+         it != fields_.rend();
+         ++it) {
+        auto const &current_field = it->second;
+        auto current_offset = it->first;
+        auto current_offset_end =
+            current_offset + current_field.count() * current_field.size();
+        if (current_offset_end <= offset) {
+            break;
+        }
+        if (current_field.size() != field.size()) {
+            continue;
+        }
+        // Alignment check
+        if (current_offset % field.size() != offset % field.size()) {
+            continue;
+        }
+        // TODO: use better type priorities
+        switch (current_field.type()) {
+        case Field::Type::UInt:
+        case Field::Type::Int:
+            if (field.is_typed_int_alias(current_field.size())
+                && field.type() <= current_field.type()) {
                 return true;
             }
+            break;
+        case Field::Type::Float:
+            if (field.is_float_alias(current_field.size())
+                && field.type() <= current_field.type()) {
+                return true;
+            }
+            break;
+        case Field::Type::Pointer:
+            if (field.is_pointer_alias(current_field.size())
+                && field.type() <= current_field.type()) {
+                return true;
+            }
+            break;
+        case Field::Type::Struc:
+            if (field.type() == current_field.type()) {
+                return true;
+            }
+            break;
         }
     }
     return false;
@@ -189,7 +215,6 @@ size_t Struc::remove_aliases(size_t offset,
          it != fields_.end() && it->first == offset;) {
         count = std::max(count, it->second.count());
         if ((it->second.*alias_check)(size)) {
-            utils::hash::mix(hash_, it->second.hash());
             it = fields_.erase(it);
         }
         else {
@@ -197,6 +222,53 @@ size_t Struc::remove_aliases(size_t offset,
         }
     }
     return count;
+}
+
+void Struc::merge(Struc const &src, MergeCallback merge_callback)
+{
+    if (this == &src) {
+        return;
+    }
+    {
+        std::scoped_lock<std::recursive_mutex> modify_guard(src.mutex());
+        for (auto const &[offset, field] : src.fields()) {
+            if (!try_merge_struc_field_at_offset(offset,
+                                                 field,
+                                                 merge_callback)) {
+                merge_fields(offset, field);
+            }
+        }
+    }
+    merge_callback(*this, src);
+}
+
+bool Struc::try_merge_struc_field_at_offset(size_t offset,
+                                            Field const &src_field,
+                                            MergeCallback merge_callback)
+{
+    if (src_field.type() != Struc::Field::Pointer || !src_field.struc()) {
+        return false;
+    }
+    std::scoped_lock<std::recursive_mutex> modify_guard(mutex());
+    bool merged = false;
+    for (auto it = std::reverse_iterator(fields_.upper_bound(offset));
+         it != fields_.rend();
+         ++it) {
+        auto &dst_field = it->second;
+        auto dst_field_offset = it->first;
+        auto dst_field_offset_end =
+            dst_field_offset + dst_field.count() * dst_field.size();
+        if (dst_field_offset_end <= offset) {
+            break;
+        }
+        if (dst_field.type() != Struc::Field::Type::Pointer
+            || !dst_field.struc() || dst_field_offset % 8 != offset % 8) {
+            continue;
+        }
+        dst_field.struc()->merge(*src_field.struc(), merge_callback);
+        merged = true;
+    }
+    return merged;
 }
 
 void Struc::merge_fields(size_t offset, Field const &field)
@@ -224,6 +296,8 @@ size_t Struc::get_size() const
     if (fields_.empty()) {
         return 0;
     }
+    // TODO: fix the case when element before last
+    // ends at offset larger than last element
     auto last_offset = fields_.rbegin()->first;
     auto last_fields = utils::multimap_values(fields_.equal_range(last_offset));
     auto largest_last_field = std::max_element(
