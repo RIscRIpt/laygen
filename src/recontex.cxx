@@ -1167,9 +1167,7 @@ void Recontex::OptimalCoverage::find_useless_edges()
     auto is_reachable =
         [&](Edge const &blocked, Address start, Address end) -> bool {
         std::unordered_set<Address> visited;
-        std::function<bool(Address)> dfs;
-        auto check_node = [&](Edge const &edge) -> bool { return false; };
-        dfs = [&](Address v) -> bool {
+        std::function<bool(Address)> dfs = [&](Address v) -> bool {
             if (auto it = nodes_order_.find(v);
                 it == nodes_order_.end() || it->second > nodes_order_[end]) {
                 return false;
