@@ -59,10 +59,10 @@ set_target_properties(
 
 target_compile_options(
     ${DUMMY_NAME} PRIVATE
-    "/GS-"
+    "/GS-" "/d2SSAOptimizer-" "/O2" "/Ob0" "/GL-"
 )
 
 target_link_options(
     ${DUMMY_NAME} PRIVATE
-    "/ENTRY:main" "/NODEFAULTLIB"
+    "/ENTRY:main" "/NODEFAULTLIB" "/DEBUG:FULL" "/LTCG:OFF"
 )
