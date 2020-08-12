@@ -125,7 +125,7 @@ namespace rstc {
 
         void set_end(Address end);
 
-        void add_cycle(Contexts const &contexts, Address first, Address last);
+        void add_cycle(Address first, Address last);
         void add_reference(Address reference);
 
         bool is_inside(Address address) const;

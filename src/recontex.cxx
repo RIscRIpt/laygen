@@ -199,6 +199,9 @@ void Recontex::run_analysis(Flo &flo)
                     flo_contexts,
                     opt_cov.paths(),
                     make_flo_initial_contexts(flo));
+        for (auto const &cycle : opt_cov.loops()) {
+            flo.add_cycle(cycle.src, cycle.dst);
+        }
         {
             std::scoped_lock<std::mutex> add_contexts_guard(
                 modify_access_contexts_mutex_);

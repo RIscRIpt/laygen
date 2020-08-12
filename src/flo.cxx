@@ -242,41 +242,46 @@ bool Flo::modifies_flags_register(ZydisDecodedInstruction const &instruction)
         });
 }
 
-void Flo::add_cycle(Contexts const &contexts, Address first, Address last)
+void Flo::add_cycle(Address first, Address last)
 {
-    assert(is_inside(first));
+    assert(is_inside(first) && is_inside(last));
     Cycle::ExitConditions exit_conditions;
-    auto it = disassembly_.find(first);
+    auto it = disassembly_.find(last);
+    if (Flo::is_any_jump(it->second->mnemonic)) {
+        auto dst = Flo::get_jump_destination(last, *it->second);
+        if (dst) {
+            first = std::min(first, dst);
+        }
+    }
+    it = disassembly_.find(first);
     auto add_exit_condition = [first, &exit_conditions](decltype(it) it) {
-        auto jt = it;
-        for (; jt->first >= first; --jt) {
-            if (modifies_flags_register(*jt->second)) {
-                auto const &op = jt->second->operands[0];
-                if (op.type == ZYDIS_OPERAND_TYPE_REGISTER) {
-                    exit_conditions.emplace(
-                        std::piecewise_construct,
-                        std::forward_as_tuple(
-                            virt::Registers::promote(op.reg.value)),
-                        std::forward_as_tuple(jt->second.get(),
-                                              it->second->mnemonic));
-                }
-                break;
+        for (auto jt = std::prev(it); jt->first >= first; --jt) {
+            if (!modifies_flags_register(*jt->second)) {
+                continue;
+            }
+            auto const &op = jt->second->operands[0];
+            if (op.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                exit_conditions.emplace(
+                    std::piecewise_construct,
+                    std::forward_as_tuple(
+                        virt::Registers::promote(op.reg.value)),
+                    std::forward_as_tuple(jt->second.get(),
+                                          it->second->mnemonic));
             }
         }
     };
-    while (it->first < last) {
-        if (Flo::is_conditional_jump(it->second->mnemonic)) {
-            for (auto dst :
-                 get_jump_destinations(it->first, *it->second, contexts)) {
-                if (dst <= last) {
-                    // Jump is not outside cycle
-                    goto next;
-                }
-            }
+    for (; it->first < last; ++it) {
+        if (!Flo::is_conditional_jump(it->second->mnemonic)) {
+            continue;
+        }
+        auto dst = Flo::get_jump_destination(it->first, *it->second);
+        if (!dst) {
+            continue;
+        }
+        if (dst > last) {
+            // Jump is outside cycle
             add_exit_condition(it);
         }
-    next:
-        ++it;
     }
     assert(it->first == last);
     if (Flo::is_conditional_jump(it->second->mnemonic)) {
