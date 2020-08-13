@@ -131,7 +131,7 @@ void Restruc::analyze_flo(Flo &flo)
                     if (auto reg = context.get_register(op.reg.value); reg) {
 #ifdef DEBUG_ANALYSIS
                         std::clog << "Saving root register for #" << std::hex
-                                  << std::setw(8) << reg->raw_value() << '\t';
+                                  << std::setw(16) << reg->raw_value() << "\t: ";
                         dumper.dump_instruction(std::clog, va, *instruction);
 #endif
                         flo_domain.root_map.emplace(*reg, op.reg.value);
@@ -156,10 +156,11 @@ void Restruc::analyze_flo(Flo &flo)
                                                             instruction.get());
                         group.base_regs.emplace(reg->source(), op.mem.base);
 #ifdef DEBUG_ANALYSIS
-                        std::clog << "Saving base register @ " << std::hex
-                                  << std::setw(8)
-                                  << pe_.raw_to_virtual_address(address) << ": "
-                                  << pe_.raw_to_virtual_address(reg->source())
+                        std::clog << "Saving base register for #" << std::hex
+                                  << std::setw(16) << reg->raw_value() << "\t@ "
+                                  << std::hex << std::setw(8)
+                                  << pe_.raw_to_virtual_address(address) << " :  "
+                                  << (reg->source() ? pe_.raw_to_virtual_address(reg->source()) : 0)
                                   << '\n';
 #endif
                     }
