@@ -139,6 +139,17 @@ namespace rstc {
             Paths paths_;
         };
 
+        struct AnalyzePath {
+            AnalyzePath(OptimalCoverage::Path const &path)
+                : current(path.begin())
+                , end(path.end())
+            {
+            }
+            OptimalCoverage::Path::const_iterator current, end;
+        };
+
+        using AnalyzePaths = std::vector<AnalyzePath>;
+
         struct PropagationResult {
             Contexts new_contexts;
             ZydisDecodedInstruction const *instruction = nullptr;
@@ -161,8 +172,15 @@ namespace rstc {
 
         void analyze_flo(Flo &flo,
                          FloContexts &flo_contexts,
-                         OptimalCoverage::Paths const &optimal_paths,
-                         Contexts contexts);
+                         AnalyzePaths paths,
+                         Contexts contexts,
+                         Address address);
+
+        static AnalyzePaths
+        optimal_paths_to_analyze_paths(OptimalCoverage::Paths const &paths);
+        static AnalyzePaths split_analyze_paths(AnalyzePaths &paths);
+        static void advance_analyze_paths(AnalyzePaths &paths);
+        static bool same_analyze_path(AnalyzePaths const &paths);
 
         void filter_contexts(FloContexts &flo_contexts,
                              Address address,

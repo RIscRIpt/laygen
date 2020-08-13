@@ -13,8 +13,8 @@
 using namespace rstc;
 
 //#define DEBUG_ANALYSIS_PROGRESS
-//#define DEBUG_CONTEXT_PROPAGATION
 //#define DEBUG_OPTIMAL_COVERAGE
+//#define DEBUG_CONTEXT_PROPAGATION
 //#define DEBUG_CONTEXT_PROPAGATION_VALUES
 
 ZydisRegister const Recontex::volatile_registers_[] = {
@@ -197,8 +197,9 @@ void Recontex::run_analysis(Flo &flo)
 #endif
         analyze_flo(flo,
                     flo_contexts,
-                    opt_cov.paths(),
-                    make_flo_initial_contexts(flo));
+                    optimal_paths_to_analyze_paths(opt_cov.paths()),
+                    make_flo_initial_contexts(flo),
+                    flo.entry_point);
         for (auto const &cycle : opt_cov.loops()) {
             flo.add_cycle(cycle.src, cycle.dst);
         }
@@ -220,115 +221,171 @@ void Recontex::wait_for_analysis()
 
 void Recontex::analyze_flo(Flo &flo,
                            FloContexts &flo_contexts,
-                           OptimalCoverage::Paths const &optimal_paths,
-                           Contexts contexts)
+                           AnalyzePaths paths,
+                           Contexts contexts,
+                           Address address)
 {
-    for (auto const &optimal_path : optimal_paths) {
-#ifdef DEBUG_OPTIMAL_COVERAGE
-        std::clog << "Using path: ";
-        for (auto [jump, branch] : optimal_path) {
-            std::clog << std::hex << pe_.raw_to_virtual_address(jump)
-                      << (branch ? '+' : '-') << ' ';
-        }
-        std::clog << '\n';
-#endif
-        auto next_node = optimal_path.begin();
-        auto last_instr = flo.get_disassembly().rbegin();
-        auto end = last_instr->first + last_instr->second->length;
-        auto address = flo.entry_point;
-        while (address && address < end && !contexts.empty()) {
+    auto next_node = paths.begin();
+    // Assert all paths have the same next jump
+    assert(same_analyze_path(paths));
+    auto last_instr = flo.get_disassembly().rbegin();
+    auto end = last_instr->first + last_instr->second->length;
+    while (address && address < end) {
+        assert(!contexts.empty());
 #ifdef DEBUG_CONTEXT_PROPAGATION
-            DWORD va = pe_.raw_to_virtual_address(address);
+        DWORD va = pe_.raw_to_virtual_address(address);
 #endif
-            auto propagation_result = propagate_contexts(flo,
-                                                         flo_contexts,
-                                                         address,
-                                                         std::move(contexts));
-            contexts = std::move(propagation_result.new_contexts);
-            auto const instr = propagation_result.instruction;
+        auto propagation_result =
+            propagate_contexts(flo, flo_contexts, address, std::move(contexts));
+        contexts = std::move(propagation_result.new_contexts);
+        auto const instr = propagation_result.instruction;
 #ifdef DEBUG_CONTEXT_PROPAGATION
-            std::clog << std::dec << std::setfill(' ') << std::setw(5)
-                      << std::right << contexts.size() << "/" << std::setw(5)
-                      << std::left << flo_contexts.count(address);
-            if (instr) {
-                Dumper dumper;
-                dumper.dump_instruction(std::clog, va, *instr);
+        std::clog << std::dec << std::setfill(' ') << std::setw(5) << std::right
+                  << contexts.size() << "/" << std::setw(5) << std::left
+                  << flo_contexts.count(address);
+        if (instr) {
+            Dumper dumper;
+            dumper.dump_instruction(std::clog, va, *instr);
     #ifdef DEBUG_CONTEXT_PROPAGATION_VALUES
-                // Read values
-                for (size_t i = 0; i < instr->operand_count; i++) {
-                    auto const &op = instr->operands[i];
-                    if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
-                        continue;
-                    }
-                    for (auto const &context : contexts) {
-                        switch (op.type) {
-                        case ZYDIS_OPERAND_TYPE_REGISTER:
-                            if (op.visibility
-                                == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
-                                dump_register_value(std::clog,
-                                                    dumper,
-                                                    reflo_,
-                                                    context,
-                                                    op.reg.value);
-                            }
-                            break;
-                        case ZYDIS_OPERAND_TYPE_MEMORY:
-                            if (op.mem.base != ZYDIS_REGISTER_NONE
-                                && op.mem.base != ZYDIS_REGISTER_RIP) {
-                                dump_register_value(std::clog,
-                                                    dumper,
-                                                    reflo_,
-                                                    context,
-                                                    op.mem.base);
-                            }
-                            if (op.mem.index != ZYDIS_REGISTER_NONE) {
-                                dump_register_value(std::clog,
-                                                    dumper,
-                                                    reflo_,
-                                                    context,
-                                                    op.mem.index);
-                            }
-                            break;
-                        default: break;
+            // Read values
+            for (size_t i = 0; i < instr->operand_count; i++) {
+                auto const &op = instr->operands[i];
+                if (!(op.actions & ZYDIS_OPERAND_ACTION_MASK_READ)) {
+                    continue;
+                }
+                for (auto const &context : contexts) {
+                    switch (op.type) {
+                    case ZYDIS_OPERAND_TYPE_REGISTER:
+                        if (op.visibility
+                            == ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
+                            dump_register_value(std::clog,
+                                                dumper,
+                                                reflo_,
+                                                context,
+                                                op.reg.value);
                         }
+                        break;
+                    case ZYDIS_OPERAND_TYPE_MEMORY:
+                        if (op.mem.base != ZYDIS_REGISTER_NONE
+                            && op.mem.base != ZYDIS_REGISTER_RIP) {
+                            dump_register_value(std::clog,
+                                                dumper,
+                                                reflo_,
+                                                context,
+                                                op.mem.base);
+                        }
+                        if (op.mem.index != ZYDIS_REGISTER_NONE) {
+                            dump_register_value(std::clog,
+                                                dumper,
+                                                reflo_,
+                                                context,
+                                                op.mem.index);
+                        }
+                        break;
+                    default: break;
                     }
                 }
+            }
     #endif
-            }
-            else {
-                std::clog << std::hex << std::setfill('0') << std::setw(8)
-                          << std::right << pe_.raw_to_virtual_address(address)
-                          << '\n';
-            }
+        }
+        else {
+            std::clog << std::hex << std::setfill('0') << std::setw(8)
+                      << std::right << pe_.raw_to_virtual_address(address)
+                      << '\n';
+        }
 #endif
-            if (!instr || contexts.empty()) {
+        if (!instr || contexts.empty()) {
+            break;
+        }
+        assert(next_node->current == next_node->end
+               || next_node->current->jump >= address);
+        if (Flo::is_any_jump(instr->mnemonic)) {
+            if (next_node->current == next_node->end) {
                 break;
             }
-            assert(next_node == optimal_path.end()
-                   || next_node->jump >= address);
-            if (Flo::is_any_jump(instr->mnemonic)) {
-                if (next_node != optimal_path.end()) {
-                    assert(next_node->jump == address);
-                    if (next_node->take) {
-                        assert(instr->operand_count > 0);
-                        auto const &op = instr->operands[0];
-                        assert(op.type == ZYDIS_OPERAND_TYPE_IMMEDIATE);
-                        address += instr->length + op.imm.value.s;
-                        ++next_node;
-                        continue;
-                    }
-                    ++next_node;
-                }
+            assert(next_node->current->jump == address);
+            auto skip_jump_paths = split_analyze_paths(paths);
+            if (!skip_jump_paths.empty()) {
+                advance_analyze_paths(skip_jump_paths);
+                analyze_flo(flo,
+                            flo_contexts,
+                            std::move(skip_jump_paths),
+                            make_child_contexts(contexts),
+                            address + instr->length);
             }
-            else if (instr->mnemonic == ZYDIS_MNEMONIC_RET) {
-                assert(next_node == optimal_path.end()
-                       || (next_node->jump == address
-                           && std::next(next_node) == optimal_path.end()));
-                break;
+            if (paths.empty()) {
+                return;
             }
+            assert(instr->operand_count > 0);
+            auto const &op = instr->operands[0];
+            assert(op.type == ZYDIS_OPERAND_TYPE_IMMEDIATE);
+            address += instr->length + op.imm.value.s;
+            advance_analyze_paths(paths);
+            assert(same_analyze_path(paths));
+            next_node = paths.begin();
+            continue;
+        }
+        else if (instr->mnemonic == ZYDIS_MNEMONIC_RET) {
+            assert(next_node->current == next_node->end
+                   || (next_node->current->jump == address
+                       && std::next(next_node->current) == next_node->end));
+#ifndef NDEBUG
+            advance_analyze_paths(paths);
+            assert(same_analyze_path(paths));
+#endif
+            break;
+        }
+        else {
             address += instr->length;
         }
     }
+}
+
+Recontex::AnalyzePaths
+Recontex::optimal_paths_to_analyze_paths(OptimalCoverage::Paths const &paths)
+{
+    AnalyzePaths analyze_paths;
+    analyze_paths.reserve(paths.size());
+    for (auto const &path : paths) {
+        analyze_paths.emplace_back(path);
+    }
+    return analyze_paths;
+}
+
+Recontex::AnalyzePaths Recontex::split_analyze_paths(AnalyzePaths &paths)
+{
+    AnalyzePaths skip_jump_paths;
+    auto it =
+        std::remove_if(paths.begin(), paths.end(), [](AnalyzePath const &path) {
+            return !path.current->take;
+        });
+    skip_jump_paths.reserve(std::distance(it, paths.end()));
+    std::copy(it, paths.end(), std::back_inserter(skip_jump_paths));
+    paths.erase(it, paths.end());
+    return skip_jump_paths;
+}
+
+void Recontex::advance_analyze_paths(AnalyzePaths &paths)
+{
+    for (auto &path : paths) {
+        if (path.current != path.end) {
+            ++path.current;
+        }
+    }
+}
+
+bool Recontex::same_analyze_path(AnalyzePaths const &paths)
+{
+    return std::all_of(
+        paths.begin(),
+        paths.end(),
+        [&paths](AnalyzePath const &path) {
+            if (path.current == path.end) {
+                return paths.front().current == paths.front().end;
+            }
+            assert(paths.front().current != paths.front().end);
+            return path.current->jump == paths.front().current->jump;
+        });
 }
 
 void Recontex::filter_contexts(FloContexts &flo_contexts,
