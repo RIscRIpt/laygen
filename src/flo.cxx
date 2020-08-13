@@ -283,7 +283,10 @@ void Flo::add_cycle(Address first, Address last)
             add_exit_condition(it);
         }
     }
-    assert(it->first == last);
+    if (it->first != last) {
+        // Something went wrong, TODO: add support for weird cycles
+        return;
+    }
     if (Flo::is_conditional_jump(it->second->mnemonic)) {
         add_exit_condition(it);
     }
