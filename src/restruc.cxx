@@ -125,13 +125,17 @@ void Restruc::analyze_flo(Flo &flo)
                 continue;
             }
             if (op.type == ZYDIS_OPERAND_TYPE_REGISTER
-                && op.actions & ZYDIS_OPERAND_ACTION_MASK_READ) {
+                && op.actions & ZYDIS_OPERAND_ACTION_MASK_READ
+                && !(op.actions & ZYDIS_OPERAND_ACTION_MASK_WRITE)) {
                 for (auto const &context : utils::multimap_values(
                          flo_contexts.equal_range(address))) {
                     if (auto reg = context.get_register(op.reg.value); reg) {
 #ifdef DEBUG_ANALYSIS
-                        std::clog << "Saving root register for #" << std::hex
-                                  << std::setw(16) << reg->raw_value() << "\t: ";
+                        std::clog << "root_map: \t";
+                        dumper.dump_value(std::clog, *reg);
+                        std::clog << " -> "
+                                  << ZydisRegisterGetString(op.reg.value);
+                        std::clog << "\t: ";
                         dumper.dump_instruction(std::clog, va, *instruction);
 #endif
                         flo_domain.root_map.emplace(*reg, op.reg.value);
@@ -143,6 +147,11 @@ void Restruc::analyze_flo(Flo &flo)
                      // TODO: analyze stack
                      && op.mem.base != ZYDIS_REGISTER_RSP
                      && op.mem.base != ZYDIS_REGISTER_RIP) {
+#ifdef DEBUG_ANALYSIS
+                std::clog << "base_map: \t" << std::hex << va << " -> "
+                          << ZydisRegisterGetString(op.mem.base) << "\t: ";
+                dumper.dump_instruction(std::clog, va, *instruction);
+#endif
                 flo_domain.base_map.emplace(address, op.mem.base);
                 for (auto const &context : utils::multimap_values(
                          flo_contexts.equal_range(address))) {
@@ -151,18 +160,23 @@ void Restruc::analyze_flo(Flo &flo)
                             && Recontex::points_to_stack(reg->value())) {
                             continue;
                         }
+#ifdef DEBUG_ANALYSIS
+                        std::clog << "group ";
+                        dumper.dump_value(std::clog, *reg);
+                        std::clog
+                            << " \tbase_regs: "
+                            << (reg->source() ?
+                                    pe_.raw_to_virtual_address(reg->source()) :
+                                    0)
+                            << " -> "
+                            << ZydisRegisterGetString(op.mem.base);
+                        std::clog << " \trel_instr: ";
+                        dumper.dump_instruction(std::clog, va, *instruction);
+#endif
                         auto &group = groups[*reg];
                         group.relevant_instructions.emplace(address,
                                                             instruction.get());
                         group.base_regs.emplace(reg->source(), op.mem.base);
-#ifdef DEBUG_ANALYSIS
-                        std::clog << "Saving base register for #" << std::hex
-                                  << std::setw(16) << reg->raw_value() << "\t@ "
-                                  << std::hex << std::setw(8)
-                                  << pe_.raw_to_virtual_address(address) << " :  "
-                                  << (reg->source() ? pe_.raw_to_virtual_address(reg->source()) : 0)
-                                  << '\n';
-#endif
                     }
                 }
             }
@@ -187,20 +201,13 @@ void Restruc::create_flo_strucs(Flo &flo,
     if (groups.empty()) {
         return;
     }
-    std::clog << std::setfill('0') << std::hex << std::setw(8)
+    std::clog << std::setfill('0') << std::hex << std::right
               << pe_.raw_to_virtual_address(flo.entry_point) << ":\n";
 #endif
     for (auto &&[value, sd] : groups) {
 #ifdef DEBUG_ANALYSIS
-        if (!value.is_symbolic()) {
-            std::clog << ' ' << std::setfill('0') << std::hex << std::setw(16)
-                      << value.value() << "      :\n";
-        }
-        else {
-            std::clog << '[' << std::setfill('0') << std::hex << std::setw(16)
-                      << value.symbol().id() << '+' << std::hex << std::setw(4)
-                      << value.symbol().offset() << "]:\n";
-        }
+        dumper.dump_value(std::clog, value);
+        std::clog << ":\n";
 #endif
         sd.struc = std::make_shared<Struc>(generate_struc_name(flo, value));
         for (auto const [address, instruction] : sd.relevant_instructions) {
