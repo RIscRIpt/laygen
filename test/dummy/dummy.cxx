@@ -9,12 +9,18 @@ struct S {
     float d;
 };
 
+struct T {
+    int a;
+    unsigned int b;
+    S *s;
+};
+
 long long hash(long long v)
 {
     return v * 0x5851F42D4C957F2D + 0x14057B7EF767814F;
 }
 
-int test(S *s)
+int bar(S *s)
 {
     int result = 0;
     for (int i = 0; i < 4; i++) {
@@ -25,9 +31,16 @@ int test(S *s)
     return result;
 }
 
+int foo(T *t)
+{
+    int x = bar(t->s);
+    return (x * t->a) % t->b;
+}
+
 int main()
 {
     S s;
+    T t;
     char h[5];
     for (int i = 0; i < 4; i++) {
         s.a[i] = hash(i);
@@ -37,5 +50,8 @@ int main()
     s.b = h;
     s.c = 0.1;
     s.d = 0.1;
-    return test(&s);
+    t.a = -1;
+    t.b = 1;
+    t.s = &s;
+    return foo(&t);
 }
