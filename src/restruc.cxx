@@ -12,10 +12,10 @@
 
 using namespace rstc;
 
-#define DEBUG_ANALYSIS
-#define DEBUG_INTRA_LINK
-#define DEBUG_INTER_LINK
-#define DEBUG_MERGE
+//#define DEBUG_ANALYSIS
+//#define DEBUG_INTRA_LINK
+//#define DEBUG_INTER_LINK
+//#define DEBUG_MERGE
 
 Restruc::Restruc(Reflo const &reflo, Recontex const &recontex)
     : reflo_(reflo)
@@ -124,35 +124,11 @@ void Restruc::analyze_flo(Flo &flo)
             if (op.visibility != ZYDIS_OPERAND_VISIBILITY_EXPLICIT) {
                 continue;
             }
-            if (op.type == ZYDIS_OPERAND_TYPE_REGISTER
-                && op.actions & ZYDIS_OPERAND_ACTION_MASK_READ
-                && !(op.actions & ZYDIS_OPERAND_ACTION_MASK_WRITE)) {
-                for (auto const &context : utils::multimap_values(
-                         flo_contexts.equal_range(address))) {
-                    if (auto reg = context.get_register(op.reg.value); reg) {
-#ifdef DEBUG_ANALYSIS
-                        std::clog << "root_map: \t";
-                        dumper.dump_value(std::clog, *reg);
-                        std::clog << " -> "
-                                  << ZydisRegisterGetString(op.reg.value);
-                        std::clog << "\t: ";
-                        dumper.dump_instruction(std::clog, va, *instruction);
-#endif
-                        flo_domain.root_map.emplace(*reg, op.reg.value);
-                    }
-                }
-            }
-            else if (op.type == ZYDIS_OPERAND_TYPE_MEMORY
-                     && op.mem.base != ZYDIS_REGISTER_NONE
-                     // TODO: analyze stack
-                     && op.mem.base != ZYDIS_REGISTER_RSP
-                     && op.mem.base != ZYDIS_REGISTER_RIP) {
-#ifdef DEBUG_ANALYSIS
-                std::clog << "base_map: \t" << std::hex << va << " -> "
-                          << ZydisRegisterGetString(op.mem.base) << "\t: ";
-                dumper.dump_instruction(std::clog, va, *instruction);
-#endif
-                flo_domain.base_map.emplace(address, op.mem.base);
+            if (op.type == ZYDIS_OPERAND_TYPE_MEMORY
+                && op.mem.base != ZYDIS_REGISTER_NONE
+                // TODO: analyze stack
+                && op.mem.base != ZYDIS_REGISTER_RSP
+                && op.mem.base != ZYDIS_REGISTER_RIP) {
                 for (auto const &context : utils::multimap_values(
                          flo_contexts.equal_range(address))) {
                     if (auto reg = context.get_register(op.mem.base); reg) {
@@ -168,8 +144,7 @@ void Restruc::analyze_flo(Flo &flo)
                             << (reg->source() ?
                                     pe_.raw_to_virtual_address(reg->source()) :
                                     0)
-                            << " -> "
-                            << ZydisRegisterGetString(op.mem.base);
+                            << " -> " << ZydisRegisterGetString(op.mem.base);
                         std::clog << " \trel_instr: ";
                         dumper.dump_instruction(std::clog, va, *instruction);
 #endif
@@ -384,51 +359,56 @@ void Restruc::inter_link_flo_strucs_via_stack(
         }
         Address ref_sd_base = nullptr;
         auto ref_flo_domain = get_flo_domain(*ref_flo);
-        if (ref_flo_domain) {
-            for (auto const &context :
-                 utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
-                auto rsp = context.get_register(ZYDIS_REGISTER_RSP);
-                virt::Value arg = context.get_memory(
-                    rsp->raw_address_value() + stack_offset + argument * 8,
-                    8);
-                if (!ref_flo->is_inside(arg.source())) {
-                    inter_link_flo_strucs_via_stack(*ref_flo,
-                                                    sd,
-                                                    argument,
-                                                    visited);
-                    continue;
-                }
-#ifdef DEBUG_INTER_LINK
-                std::clog << "Argument #" << argument + 1 << " source:\t";
-                dumper.dump_instruction(
-                    std::clog,
-                    pe_.raw_to_virtual_address(arg.source()),
-                    *ref_flo->get_instruction(arg.source()));
-#endif
-                if (auto new_ref_sd_base =
-                        find_ref_sd_base(arg, *ref_flo_domain);
-                    (new_ref_sd_base && new_ref_sd_base->source)
-                    && (ref_sd_base == nullptr
-                        || (new_ref_sd_base->source < ref_sd_base))) {
-                    ref_sd_base = new_ref_sd_base->source;
-                }
-                else if (new_ref_sd_base && !new_ref_sd_base->source) {
-                    inter_link_flo_strucs_via_register(
-                        *ref_flo,
-                        sd,
-                        new_ref_sd_base->root_reg,
-                        visited);
-                }
-            }
-            if (ref_sd_base) {
-                inter_link_flo_strucs(flo, sd, *ref_flo, ref_sd_base);
-            }
-        }
-        else {
+        if (!ref_flo_domain) {
             // Flo might not have FloDomain
             // if it is a single-instruction Flo
             // let's try to deeper.
             inter_link_flo_strucs_via_stack(*ref_flo, sd, argument, visited);
+            return;
+        }
+        for (auto const &context :
+             utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
+            auto rsp = context.get_register(ZYDIS_REGISTER_RSP);
+            virt::Value arg = context.get_memory(
+                rsp->raw_address_value() + stack_offset + argument * 8,
+                8);
+            if (!ref_flo->is_inside(arg.source())) {
+                inter_link_flo_strucs_via_stack(*ref_flo,
+                                                sd,
+                                                argument,
+                                                visited);
+                continue;
+            }
+#ifdef DEBUG_INTER_LINK
+            std::clog << "Trying to link via argument " << argument + 1 << " #";
+            dumper.dump_value(std::clog, arg);
+            std::clog << '\n';
+#endif
+            // Get real source of arg
+            auto const &instruction = ref_flo->get_instruction(arg.source());
+            switch (instruction->mnemonic) {
+            case ZYDIS_MNEMONIC_MOV: {
+                // Assume mov [rsp + stac_offset + argument * 8], <REG>
+                auto const &dst = instruction->operands[0];
+                auto const &src = instruction->operands[1];
+                if (dst.type == ZYDIS_OPERAND_TYPE_MEMORY
+                    && dst.mem.base == ZYDIS_REGISTER_RSP
+                    && src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
+                    for (auto const &context : utils::multimap_values(
+                             ref_flo_contexts.equal_range(arg.source()))) {
+                        auto reg = context.get_register(src.reg.value);
+                        if (!reg) {
+                            continue;
+                        }
+                        inter_link_flo_strucs(flo, sd, *ref_flo, reg->source());
+                    }
+                }
+            } break;
+            case ZYDIS_MNEMONIC_PUSH: {
+                // TODO
+            } break;
+            default: break;
+            }
         }
     }
 }
@@ -460,97 +440,70 @@ void Restruc::inter_link_flo_strucs_via_register(
         Address ref_sd_base = nullptr;
         auto const &ref_flo_contexts = recontex_.get_contexts(*ref_flo);
         auto ref_flo_domain = get_flo_domain(*ref_flo);
-        if (ref_flo_domain) {
-            for (auto const &context :
-                 utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
-                if (auto val = context.get_register(base_reg); val) {
-#ifdef DEBUG_INTER_LINK
-                    std::clog << "Trying to find struc domain base for "
-                              << ZydisRegisterGetString(base_reg) << ": ";
-                    dumper.dump_value(std::clog, *val);
-#endif
-                    if (auto new_ref_sd_base =
-                            find_ref_sd_base(*val, *ref_flo_domain);
-                        (new_ref_sd_base && new_ref_sd_base->source)
-                        && (ref_sd_base == nullptr
-                            || (new_ref_sd_base->source < ref_sd_base))) {
-                        ref_sd_base = new_ref_sd_base->source;
-                    }
-                    else if (new_ref_sd_base && !new_ref_sd_base->root_reg) {
-                        inter_link_flo_strucs_via_register(
-                            *ref_flo,
-                            sd,
-                            new_ref_sd_base->root_reg,
-                            visited);
-                    }
-                }
-            }
-            if (ref_sd_base) {
-                inter_link_flo_strucs(flo, sd, *ref_flo, ref_sd_base);
-            }
-        }
-        else {
+        if (!ref_flo_domain) {
             // Flo might not have FloDomain
             // if it is a single-instruction Flo
             // let's try to deeper.
             inter_link_flo_strucs_via_register(*ref_flo, sd, base_reg, visited);
         }
+        for (auto const &context :
+             utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
+            auto val = context.get_register(base_reg);
+            if (!val) {
+                continue;
+            }
+            if (!val->source()) {
+                inter_link_flo_strucs_via_register(*ref_flo,
+                                                   sd,
+                                                   base_reg,
+                                                   visited);
+                continue;
+            }
+#ifdef DEBUG_INTER_LINK
+            std::clog << "Trying to link via "
+                      << ZydisRegisterGetString(base_reg) << " #";
+            dumper.dump_value(std::clog, *val);
+            std::clog << '\n';
+#endif
+            inter_link_flo_strucs(flo, sd, *ref_flo, val->source());
+        }
     }
-}
-
-std::optional<Restruc::StrucDomainBase>
-Restruc::find_ref_sd_base(virt::Value const &value,
-                          FloDomain const &ref_flo_domain)
-{
-    if (auto it = ref_flo_domain.root_map.find(value);
-        it != ref_flo_domain.root_map.end()) {
-        return StrucDomainBase{ it->first.source(), it->second };
-    }
-    return std::nullopt;
-}
-
-ZydisRegister Restruc::find_ref_sd_base_reg(Address ref_sd_base,
-                                            FloDomain const &ref_flo_domain)
-{
-    if (auto it = ref_flo_domain.base_map.find(ref_sd_base);
-        it != ref_flo_domain.base_map.end()) {
-        return it->second;
-    }
-    return ZYDIS_REGISTER_NONE;
 }
 
 void Restruc::inter_link_flo_strucs(Flo const &flo,
                                     StrucDomain const &sd,
                                     Flo const &ref_flo,
-                                    Address ref_sd_base)
+                                    Address link)
 {
-#ifdef DEBUG_INTER_LINK
-    Dumper dumper;
-    std::clog << "Reference Flo StructWrapper base:\n";
-    dumper.dump_instruction(std::clog,
-                            pe_.raw_to_virtual_address(ref_sd_base),
-                            *ref_flo.get_instruction(ref_sd_base));
-#endif
     auto const &ref_flo_domain = *get_flo_domain(ref_flo);
     auto const &ref_flo_contexts = recontex_.get_contexts(ref_flo);
-    auto ref_sd_base_reg = find_ref_sd_base_reg(ref_sd_base, ref_flo_domain);
-    if (ref_sd_base_reg == ZYDIS_REGISTER_NONE) {
-        return;
-    }
-    for (auto const &context :
-         utils::multimap_values(ref_flo_contexts.equal_range(ref_sd_base))) {
-        if (auto reg = context.get_register(ref_sd_base_reg); reg) {
-            if (auto it = ref_flo_domain.strucs.find(*reg);
-                it != ref_flo_domain.strucs.end()) {
-                auto &parent_sd = it->second;
-                auto it_rel_instr =
-                    parent_sd.relevant_instructions.find(ref_sd_base);
-                if (it_rel_instr == parent_sd.relevant_instructions.end()) {
+    auto const &instruction = *ref_flo.get_instruction(link);
+#ifdef DEBUG_INTER_LINK
+    Dumper dumper;
+    std::clog << "Trying to link via instruction ";
+    dumper.dump_instruction(std::clog,
+                            pe_.raw_to_virtual_address(link),
+                            instruction);
+#endif
+    // TODO: Add support for linkage via more instructions (if needed)
+    if (instruction.mnemonic == ZYDIS_MNEMONIC_MOV) {
+        auto const &src = instruction.operands[1];
+        if (src.type == ZYDIS_OPERAND_TYPE_MEMORY
+            && src.mem.base != ZYDIS_REGISTER_NONE) {
+            for (auto const &context :
+                 utils::multimap_values(ref_flo_contexts.equal_range(link))) {
+                auto reg = context.get_register(src.mem.base);
+                if (!reg) {
                     continue;
                 }
-                auto mem_op = get_memory_operand(*it_rel_instr->second);
-                intptr_t offset = mem_op->mem.disp.value;
-                if (!mem_op || offset < 0) {
+                auto it = ref_flo_domain.strucs.find(*reg);
+                if (it == ref_flo_domain.strucs.end()) {
+                    continue;
+                }
+
+                auto &parent_sd = it->second;
+                intptr_t offset = src.mem.disp.value;
+                if (offset < 0) {
                     continue;
                 }
                 auto &parent_struc = *parent_sd.struc;

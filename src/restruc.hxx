@@ -27,13 +27,8 @@ namespace rstc {
 
         struct FloDomain {
             std::unordered_map<virt::Value, StrucDomain> strucs;
-            std::unordered_map<virt::Value, ZydisRegister> root_map;
-            std::unordered_map<Address, ZydisRegister> base_map;
 
-            inline bool empty() const
-            {
-                return strucs.empty() && base_map.empty() && root_map.empty();
-            }
+            inline bool empty() const { return strucs.empty(); }
         };
 
         Restruc(Reflo const &reflo, Recontex const &recontex);
@@ -80,15 +75,10 @@ namespace rstc {
             StrucDomain const &sd,
             ZydisRegister base_reg,
             std::unordered_set<Address> &visited);
-        std::optional<StrucDomainBase>
-        find_ref_sd_base(virt::Value const &value,
-                         FloDomain const &ref_flo_info);
-        ZydisRegister find_ref_sd_base_reg(Address ref_sd_base,
-                                           FloDomain const &ref_flo_info);
         void inter_link_flo_strucs(Flo const &flo,
                                    StrucDomain const &sd,
                                    Flo const &ref_flo,
-                                   Address ref_sd_base);
+                                   Address link);
 
         void
         try_merge_struc_field_at_offset(Struc &dst,
