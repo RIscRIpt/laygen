@@ -26,10 +26,6 @@ namespace rstc {
         Contexts &operator=(Contexts const &) = delete;
         Contexts &operator=(Contexts &&rhs) = default;
 
-        void remove_multimap_duplicates(
-            std::multimap<Address, Context> const &multimap,
-            Address value);
-
         inline auto begin() { return container_.begin(); }
         inline auto end() { return container_.end(); }
         inline auto begin() const { return container_.begin(); }

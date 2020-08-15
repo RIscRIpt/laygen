@@ -182,9 +182,6 @@ namespace rstc {
         static void advance_analyze_paths(AnalyzePaths &paths);
         static bool same_analyze_path(AnalyzePaths const &paths);
 
-        void filter_contexts(FloContexts &flo_contexts,
-                             Address address,
-                             Contexts &contexts);
         PropagationResult propagate_contexts(Flo const &flo,
                                              FloContexts &flo_contexts,
                                              Address address,

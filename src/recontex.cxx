@@ -388,15 +388,6 @@ bool Recontex::same_analyze_path(AnalyzePaths const &paths)
         });
 }
 
-void Recontex::filter_contexts(FloContexts &flo_contexts,
-                               Address address,
-                               Contexts &contexts)
-{
-    // Compare contexts with existing contexts, eliminating duplicates.
-    // It should be enough to filter once per basic block.
-    contexts.remove_multimap_duplicates(flo_contexts, address);
-}
-
 Recontex::PropagationResult
 Recontex::propagate_contexts(Flo const &flo,
                              FloContexts &flo_contexts,
