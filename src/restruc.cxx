@@ -12,10 +12,10 @@
 
 using namespace rstc;
 
-//#define DEBUG_ANALYSIS
-//#define DEBUG_INTRA_LINK
-//#define DEBUG_INTER_LINK
-//#define DEBUG_MERGE
+#define DEBUG_ANALYSIS
+#define DEBUG_INTRA_LINK
+#define DEBUG_INTER_LINK
+#define DEBUG_MERGE
 
 Restruc::Restruc(Reflo const &reflo, Recontex const &recontex)
     : reflo_(reflo)
@@ -216,12 +216,7 @@ void Restruc::create_flo_strucs(Flo &flo,
                                     pe_.raw_to_virtual_address(address),
                                     *instruction);
 #endif
-            auto cycles = flo.get_cycles(address);
-            add_struc_field(*sd.struc,
-                            address,
-                            recontex_.get_contexts(flo),
-                            *instruction,
-                            cycles);
+            add_struc_field(flo, address, *sd.struc, *instruction);
         }
 #ifdef DEBUG_ANALYSIS
         std::clog << '\n';
@@ -272,7 +267,14 @@ void Restruc::intra_link_flo_strucs(Flo &flo,
                         }
 #ifdef DEBUG_INTRA_LINK
                         std::clog << "Linking " << sd.struc->name() << " with "
-                                  << parent_struc.name() << '\n';
+                                  << parent_struc.name() << " by "
+                                  << ZydisRegisterGetString(src.mem.base) << ' ';
+                        dumper.dump_value(std::clog, *reg);
+                        std::clog << " : ";
+                        dumper.dump_instruction(
+                            std::clog,
+                            pe_.raw_to_virtual_address(value.source()),
+                            instruction);
 #endif
                         parent_struc.add_pointer_field(offset,
                                                        1,
@@ -462,6 +464,11 @@ void Restruc::inter_link_flo_strucs_via_register(
             for (auto const &context :
                  utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
                 if (auto val = context.get_register(base_reg); val) {
+#ifdef DEBUG_INTER_LINK
+                    std::clog << "Trying to find struc domain base for "
+                              << ZydisRegisterGetString(base_reg) << ": ";
+                    dumper.dump_value(std::clog, *val);
+#endif
                     if (auto new_ref_sd_base =
                             find_ref_sd_base(*val, *ref_flo_domain);
                         (new_ref_sd_base && new_ref_sd_base->source)
@@ -621,11 +628,10 @@ std::string Restruc::generate_struc_name(Flo const &flo,
     return oss.str();
 }
 
-void Restruc::add_struc_field(Struc &struc,
+void Restruc::add_struc_field(Flo const &flo,
                               Address address,
-                              Recontex::FloContexts const &contexts,
-                              ZydisDecodedInstruction const &instruction,
-                              std::vector<Cycle const *> const &cycles)
+                              Struc &struc,
+                              ZydisDecodedInstruction const &instruction)
 {
     auto mem_op = get_memory_operand(instruction);
     if (!mem_op) {
@@ -638,7 +644,7 @@ void Restruc::add_struc_field(Struc &struc,
         }
         offset = mem_op->mem.disp.value;
     }
-    size_t count = get_field_count(*mem_op, cycles, address, contexts);
+    size_t count = get_field_count(flo, address, *mem_op);
     if (!mem_op->element_size) {
         if (!struc.has_field_at_offset(offset)) {
             // struc.add_pointer_field(offset, count);
@@ -679,11 +685,12 @@ Restruc::get_memory_operand(ZydisDecodedInstruction const &instruction)
 }
 
 // Returns count for Field by analyzing cycles (if any)
-size_t Restruc::get_field_count(ZydisDecodedOperand const &mem_op,
-                                std::vector<Cycle const *> const &cycles,
+size_t Restruc::get_field_count(Flo const &flo,
                                 Address address,
-                                Recontex::FloContexts const &contexts)
+                                ZydisDecodedOperand const &mem_op)
 {
+    auto const &contexts = recontex_.get_contexts(flo);
+    auto const &cycles = flo.get_cycles(address);
     size_t count = 1;
     if (cycles.empty() || mem_op.mem.index == ZYDIS_REGISTER_NONE) {
         return count;
