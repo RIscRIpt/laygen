@@ -299,7 +299,7 @@ size_t Struc::get_size() const
     // TODO: fix the case when element before last
     // ends at offset larger than last element
     auto last_offset = fields_.rbegin()->first;
-    auto last_fields = utils::multimap_values(fields_.equal_range(last_offset));
+    auto last_fields = utils::multimap_values(fields_, last_offset);
     auto largest_last_field = std::max_element(
         last_fields.begin(),
         last_fields.end(),

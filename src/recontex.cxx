@@ -844,8 +844,7 @@ bool Recontex::points_to_stack(ZydisRegister reg,
     if (reg == ZYDIS_REGISTER_RSP) {
         return true;
     }
-    for (auto const &context :
-         utils::multimap_values(flo_contexts.equal_range(address))) {
+    for (auto const &context : utils::multimap_values(flo_contexts, address)) {
         if (auto value = context.get_register(reg);
             value && !value->is_symbolic()) {
             if (points_to_stack(value->value())) {

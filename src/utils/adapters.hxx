@@ -1,6 +1,6 @@
 #pragma once
 
-#include <map>
+#include <utility>
 
 namespace rstc::utils {
 
@@ -22,11 +22,10 @@ namespace rstc::utils {
         return PairRangeAdapter<I>(pair);
     }
 
-    template<typename K, typename V>
+    template<template<typename...> typename M, typename K, typename V>
     class MultimapValuesIterator {
     public:
-        using underlying_iterator =
-            typename std::multimap<K, V>::const_iterator;
+        using underlying_iterator = typename M<K, V>::const_iterator;
         using value_type = V;
         using difference_type = typename underlying_iterator::difference_type;
         using pointer = typename underlying_iterator::pointer;
@@ -40,28 +39,28 @@ namespace rstc::utils {
         }
         value_type const &operator*() const { return iterator_->second; }
         value_type const *operator->() { return &iterator_->second; }
-        bool operator==(MultimapValuesIterator<K, V> const &rhs) const
+        bool operator==(MultimapValuesIterator<M, K, V> const &rhs) const
         {
             return iterator_ == rhs.iterator_;
         }
-        bool operator!=(MultimapValuesIterator<K, V> const &rhs) const
+        bool operator!=(MultimapValuesIterator<M, K, V> const &rhs) const
         {
             return !(*this == rhs);
         }
-        MultimapValuesIterator<K, V> operator++(int)
+        MultimapValuesIterator<M, K, V> operator++(int)
         {
             return MultimapValuesIterator(++iterator_);
         }
-        MultimapValuesIterator<K, V> &operator++()
+        MultimapValuesIterator<M, K, V> &operator++()
         {
             ++iterator_;
             return *this;
         }
-        MultimapValuesIterator<K, V> operator--(int)
+        MultimapValuesIterator<M, K, V> operator--(int)
         {
             return MultimapValuesIterator(--iterator_);
         }
-        MultimapValuesIterator<K, V> &operator--()
+        MultimapValuesIterator<M, K, V> &operator--()
         {
             --iterator_;
             return *this;
@@ -71,16 +70,12 @@ namespace rstc::utils {
         underlying_iterator iterator_;
     };
 
-    template<typename I>
-    inline auto multimap_values(std::pair<I, I> const &pair)
+    template<template<typename...> typename M, typename K, typename V>
+    inline auto multimap_values(M<K, V> const &m, K const &k)
     {
-        using mm_type = typename I::value_type;
-        using values_iterator =
-            MultimapValuesIterator<typename mm_type::first_type,
-                                   typename mm_type::second_type>;
-        return PairRangeAdapter<values_iterator>(
-            std::pair<values_iterator, values_iterator>(pair.first,
-                                                        pair.second));
+        using I = MultimapValuesIterator<M, K, V>;
+        auto range = m.equal_range(k);
+        return PairRangeAdapter<I>(std::pair<I, I>(range.first, range.second));
     }
 
 }

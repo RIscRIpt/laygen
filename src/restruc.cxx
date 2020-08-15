@@ -129,8 +129,8 @@ void Restruc::analyze_flo(Flo &flo)
                 // TODO: analyze stack
                 && op.mem.base != ZYDIS_REGISTER_RSP
                 && op.mem.base != ZYDIS_REGISTER_RIP) {
-                for (auto const &context : utils::multimap_values(
-                         flo_contexts.equal_range(address))) {
+                for (auto const &context :
+                     utils::multimap_values(flo_contexts, address)) {
                     if (auto reg = context.get_register(op.mem.base); reg) {
                         if (!reg->is_symbolic()
                             && Recontex::points_to_stack(reg->value())) {
@@ -228,8 +228,8 @@ void Restruc::intra_link_flo_strucs(Flo &flo,
             if (src.type != ZYDIS_OPERAND_TYPE_MEMORY) {
                 continue;
             }
-            for (auto const &context : utils::multimap_values(
-                     flo_contexts.equal_range(value.source()))) {
+            for (auto const &context :
+                 utils::multimap_values(flo_contexts, value.source())) {
                 if (auto reg = context.get_register(src.mem.base); reg) {
                     if (auto it = strucs.find(*reg); it != strucs.end()) {
                         auto &parent_struc = *it->second.struc;
@@ -303,8 +303,8 @@ void Restruc::inter_link_flo_strucs(Flo &flo)
                 continue;
             }
             std::unordered_set<int> linked_arg;
-            for (auto const &context : utils::multimap_values(
-                     flo_contexts.equal_range(value.source()))) {
+            for (auto const &context :
+                 utils::multimap_values(flo_contexts, value.source())) {
                 if (auto address = Recontex::get_memory_address(src, context);
                     !address.is_symbolic()) {
                     auto argument =
@@ -367,7 +367,7 @@ void Restruc::inter_link_flo_strucs_via_stack(
             return;
         }
         for (auto const &context :
-             utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
+             utils::multimap_values(ref_flo_contexts, ref)) {
             auto rsp = context.get_register(ZYDIS_REGISTER_RSP);
             virt::Value arg = context.get_memory(
                 rsp->raw_address_value() + stack_offset + argument * 8,
@@ -395,7 +395,7 @@ void Restruc::inter_link_flo_strucs_via_stack(
                     && dst.mem.base == ZYDIS_REGISTER_RSP
                     && src.type == ZYDIS_OPERAND_TYPE_REGISTER) {
                     for (auto const &context : utils::multimap_values(
-                             ref_flo_contexts.equal_range(arg.source()))) {
+                             ref_flo_contexts, arg.source())) {
                         auto reg = context.get_register(src.reg.value);
                         if (!reg) {
                             continue;
@@ -447,7 +447,7 @@ void Restruc::inter_link_flo_strucs_via_register(
             inter_link_flo_strucs_via_register(*ref_flo, sd, base_reg, visited);
         }
         for (auto const &context :
-             utils::multimap_values(ref_flo_contexts.equal_range(ref))) {
+             utils::multimap_values(ref_flo_contexts, ref)) {
             auto val = context.get_register(base_reg);
             if (!val) {
                 continue;
@@ -491,7 +491,7 @@ void Restruc::inter_link_flo_strucs(Flo const &flo,
         if (src.type == ZYDIS_OPERAND_TYPE_MEMORY
             && src.mem.base != ZYDIS_REGISTER_NONE) {
             for (auto const &context :
-                 utils::multimap_values(ref_flo_contexts.equal_range(link))) {
+                 utils::multimap_values(ref_flo_contexts, link)) {
                 auto reg = context.get_register(src.mem.base);
                 if (!reg) {
                     continue;
@@ -650,14 +650,13 @@ size_t Restruc::get_field_count(Flo const &flo,
     }
     for (auto const &cycle : cycles) {
         ZydisRegister exit_reg = ZYDIS_REGISTER_NONE;
-        for (auto const &context :
-             utils::multimap_values(contexts.equal_range(address))) {
+        for (auto const &context : utils::multimap_values(contexts, address)) {
             auto index = context.get_register(mem_op.mem.index);
             if (!index) {
                 continue;
             }
             for (auto const &exit_context :
-                 utils::multimap_values(contexts.equal_range(cycle->last))) {
+                 utils::multimap_values(contexts, cycle->last)) {
                 for (auto const &[er, ec] : cycle->exit_conditions) {
                     auto reg = exit_context.get_register(er);
                     if (!reg) {
@@ -672,8 +671,8 @@ size_t Restruc::get_field_count(Flo const &flo,
         }
         continue;
     exit_reg_found:
-        for (auto const &ec : utils::multimap_values(
-                 cycle->exit_conditions.equal_range(exit_reg))) {
+        for (auto const &ec :
+             utils::multimap_values(cycle->exit_conditions, exit_reg)) {
             auto const &op2 = ec.instruction->operands[1];
             if (ec.instruction->mnemonic == ZYDIS_MNEMONIC_CMP
                 && is_less_than_jump(ec.jump)) {
@@ -686,8 +685,8 @@ size_t Restruc::get_field_count(Flo const &flo,
                     }
                     break;
                 case ZYDIS_OPERAND_TYPE_REGISTER:
-                    for (auto const &context : utils::multimap_values(
-                             contexts.equal_range(address))) {
+                    for (auto const &context :
+                         utils::multimap_values(contexts, address)) {
                         if (auto value = context.get_register(op2.reg.value);
                             value) {
                             if (!value->is_symbolic()) {
@@ -697,8 +696,8 @@ size_t Restruc::get_field_count(Flo const &flo,
                     }
                     break;
                 case ZYDIS_OPERAND_TYPE_MEMORY:
-                    for (auto const &context : utils::multimap_values(
-                             contexts.equal_range(address))) {
+                    for (auto const &context :
+                         utils::multimap_values(contexts, address)) {
                         auto address =
                             Recontex::get_memory_address(op2, context)
                                 .raw_address_value();

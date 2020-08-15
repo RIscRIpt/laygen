@@ -8,7 +8,7 @@ void Contexts::remove_multimap_duplicates(
     Address value)
 {
     Container result;
-    auto to_remove = utils::multimap_values(multimap.equal_range(value));
+    auto to_remove = utils::multimap_values(multimap, value);
     auto first1 = container_.begin();
     auto last1 = container_.end();
     auto first2 = to_remove.begin();
