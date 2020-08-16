@@ -570,13 +570,21 @@ std::string Restruc::generate_struc_name(Flo const &flo,
                                          virt::Value const &value)
 {
     std::ostringstream oss;
-    oss << std::setfill('0') << std::hex << "rs_";
+    oss << std::hex << "rs_";
     if (value.source()) {
-        oss << std::setw(8) << pe_.raw_to_virtual_address(value.source());
+        oss << pe_.raw_to_virtual_address(value.source());
     }
     else {
-        oss << std::setw(8) << pe_.raw_to_virtual_address(flo.entry_point)
-            << '_' << value.raw_value();
+        oss << pe_.raw_to_virtual_address(flo.entry_point) << '_';
+        if (value.is_symbolic()) {
+            oss << value.symbol().id();
+            if (value.symbol().offset()) {
+                oss << '_' << value.symbol().offset();
+            }
+        }
+        else {
+            oss << value.value();
+        }
     }
     return oss.str();
 }
