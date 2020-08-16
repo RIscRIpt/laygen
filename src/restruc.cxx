@@ -315,7 +315,8 @@ void Restruc::inter_link_flo_strucs(Flo &flo)
         }
         else {
             for (auto base_reg :
-                 utils::multimap_values(sd.base_regs, static_cast<Address>(nullptr))) {
+                 utils::multimap_values(sd.base_regs,
+                                        static_cast<Address>(nullptr))) {
                 inter_link_flo_strucs_via_register(flo, sd, base_reg, visited);
             }
         }
