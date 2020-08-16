@@ -314,12 +314,9 @@ void Restruc::inter_link_flo_strucs(Flo &flo)
             }
         }
         else {
-            auto base_regs = sd.base_regs.equal_range(nullptr);
-            for (auto it = base_regs.first; it != base_regs.second; ++it) {
-                inter_link_flo_strucs_via_register(flo,
-                                                   sd,
-                                                   it->second,
-                                                   visited);
+            for (auto base_reg :
+                 utils::multimap_values(sd.base_regs, static_cast<Address>(nullptr))) {
+                inter_link_flo_strucs_via_register(flo, sd, base_reg, visited);
             }
         }
     }
